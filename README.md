@@ -1,6 +1,6 @@
 # makeitdown
 
-把一整个文件夹的文档**批量转换为高保真 Markdown**，作为 LLM 知识库（参见 `llm-wiki.md` 模式）的原材料。中国大陆可用，无需海外服务。
+把一整个文件夹的文档**批量转换为高保真 Markdown**，作为 LLM 知识库的原材料。中国大陆可用，无需海外服务。
 
 基于 [microsoft/markitdown](https://github.com/microsoft/markitdown)（原生格式）与 [PaddleOCR](https://github.com/PaddlePaddle/PaddleOCR)（扫描件/图片）。
 
@@ -16,7 +16,7 @@ PDF 是否走 OCR：用 PyMuPDF 检测文字层——每页平均可提取字符
 
 ## 安装（国内网络优化）
 
-需要 **Python 3.11**（PaddlePaddle 暂不支持更新的版本）。先有 Python 再装 uv：
+需要 **Python 3.11 或 3.12**；用本地版的话建议 **3.11**（PaddlePaddle 对 3.11 支持最稳）。先有 Python 再装 uv：
 
 ```bash
 pip install uv -i https://pypi.tuna.tsinghua.edu.cn/simple
@@ -107,7 +107,7 @@ converted_at: 2026-06-15T10:30:00
 
 ## 配合 LLM 知识库
 
-转换完成后，把构建 wiki 的工作流指向 `<输出目录>`——干净的 Markdown + frontmatter 正适合 LLM 增量消化、交叉引用，详见 `llm-wiki.md`。仓库内也提供了一个薄 skill（`skill/makeitdown/SKILL.md`），让 agent 知道何时调用本工具。
+转换完成后，把构建 wiki 的工作流指向 `<输出目录>`——干净的 Markdown + frontmatter 正适合 LLM 增量消化、交叉引用。仓库内也提供了一个薄 skill（`skill/makeitdown/SKILL.md`），让 agent 知道何时调用本工具。
 
 ## 开发（从源码）
 
@@ -120,5 +120,3 @@ python -m venv .venv
 ```
 
 > Windows 用 `.venv/Scripts/python`；macOS/Linux 用 `.venv/bin/python`。
-
-设计文档见 `docs/superpowers/specs/`，实现计划见 `docs/superpowers/plans/`。

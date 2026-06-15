@@ -13,9 +13,9 @@ DEFAULT_MODEL = "PaddleOCR-VL-1.6"
 class CloudOCR:
     """Client for the PaddleOCR AI Studio job-based HTTP API."""
 
-    def __init__(self, token: str, model: str = DEFAULT_MODEL, poll_interval: float = 5.0):
+    def __init__(self, token: str, model: str | None = None, poll_interval: float = 5.0):
         self.token = token
-        self.model = model
+        self.model = model or DEFAULT_MODEL
         self.poll_interval = poll_interval
 
     @property

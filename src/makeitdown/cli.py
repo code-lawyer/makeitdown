@@ -15,8 +15,9 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("-o", "--output", help="output directory (default: <input>_md)")
     p.add_argument("--ocr-engine", choices=["local", "cloud", "auto"], default="auto",
                    help="OCR backend (default: auto = local first, fall back to cloud)")
-    p.add_argument("--ocr-model", default="PP-StructureV3",
-                   help="local OCR model (e.g. PP-StructureV3, PaddleOCR-VL)")
+    p.add_argument("--ocr-model", default=None,
+                   help="OCR model; applies to whichever backend runs "
+                        "(local default PP-StructureV3, cloud default PaddleOCR-VL-1.6)")
     p.add_argument("--cloud-token", default=None,
                    help="AI Studio token (default: env PADDLEOCR_AISTUDIO_TOKEN)")
     p.add_argument("--workers", type=int, default=os.cpu_count() or 4,

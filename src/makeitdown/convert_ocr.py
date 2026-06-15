@@ -1,3 +1,4 @@
+import threading
 from pathlib import Path
 
 from .models import ConversionResult, OCRUnavailableError
@@ -26,7 +27,7 @@ class OCRDispatcher:
     def __init__(
         self,
         engine: str = "auto",
-        model: str = "PP-StructureV3",
+        model: str | None = None,
         token: str | None = None,
         poll_interval: float = 5.0,
     ):
@@ -35,28 +36,36 @@ class OCRDispatcher:
         self.token = token
         self.poll_interval = poll_interval
         self._backend = None
+        self._lock = threading.Lock()
+
+    def _make_cloud(self) -> CloudOCR:
+        return CloudOCR(token=self.token, model=self.model, poll_interval=self.poll_interval)
 
     def _resolve_backend(self):
+        # Resolved once and cached; the lock keeps concurrent workers from
+        # racing to build two backends on the first conversion.
         if self._backend is not None:
             return self._backend
-
-        if self.engine == "local":
-            if not _LocalOCR_cls.is_available():
-                raise OCRUnavailableError(_INSTALL_HINT)
-            self._backend = LocalOCR(model=self.model)
-        elif self.engine == "cloud":
-            if not self.token:
-                raise OCRUnavailableError(_CLOUD_HINT)
-            self._backend = CloudOCR(token=self.token, poll_interval=self.poll_interval)
-        elif self.engine == "auto":
-            if _LocalOCR_cls.is_available():
+        with self._lock:
+            if self._backend is not None:
+                return self._backend
+            if self.engine == "local":
+                if not _LocalOCR_cls.is_available():
+                    raise OCRUnavailableError(_INSTALL_HINT)
                 self._backend = LocalOCR(model=self.model)
-            elif self.token:
-                self._backend = CloudOCR(token=self.token, poll_interval=self.poll_interval)
+            elif self.engine == "cloud":
+                if not self.token:
+                    raise OCRUnavailableError(_CLOUD_HINT)
+                self._backend = self._make_cloud()
+            elif self.engine == "auto":
+                if _LocalOCR_cls.is_available():
+                    self._backend = LocalOCR(model=self.model)
+                elif self.token:
+                    self._backend = self._make_cloud()
+                else:
+                    raise OCRUnavailableError(_INSTALL_HINT)
             else:
-                raise OCRUnavailableError(_INSTALL_HINT)
-        else:
-            raise ValueError(f"unknown ocr engine: {self.engine}")
+                raise ValueError(f"unknown ocr engine: {self.engine}")
         return self._backend
 
     def convert(self, path: Path) -> ConversionResult:
