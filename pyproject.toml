@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "makeitdown"
+version = "0.1.0"
+description = "Batch convert documents to high-fidelity Markdown for LLM knowledge bases"
+requires-python = ">=3.11,<3.13"
+dependencies = [
+    "markitdown[all]",
+    "pymupdf",
+    "requests",
+]
+
+[project.optional-dependencies]
+local = ["paddleocr", "paddlepaddle"]
+dev = ["pytest"]
+
+[project.scripts]
+makeitdown = "makeitdown.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
