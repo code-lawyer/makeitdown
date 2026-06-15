@@ -1,5 +1,5 @@
 import json
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from pathlib import Path
 
@@ -9,10 +9,8 @@ from .frontmatter import build_frontmatter, prepend_frontmatter
 from .router import classify
 
 
-def _iter_files(input_dir: Path):
-    for p in sorted(input_dir.rglob("*")):
-        if p.is_file():
-            yield p
+def _iter_files(input_dir: Path) -> list[Path]:
+    return sorted(p for p in input_dir.rglob("*") if p.is_file())
 
 
 def _is_up_to_date(src: Path, md: Path) -> bool:
@@ -64,27 +62,29 @@ def convert_tree(
     def handle(src: Path):
         rel = src.relative_to(input_dir)
         out_md = output_dir / rel.with_suffix(".md")
+        # Cheap stat check first so re-runs don't open (and decode) files just to skip them.
+        if skip_existing and _is_up_to_date(src, out_md):
+            return ("skipped_existing", rel, None)
         route = classify(src, text_threshold=text_threshold)
         if route == "unsupported":
             return ("skipped_unsupported", rel, None)
-        if skip_existing and _is_up_to_date(src, out_md):
-            return ("skipped_existing", rel, None)
         try:
             if route == "native":
                 result = convert_native(src)
             else:
                 result = dispatcher.convert(src)
-            _write_output(out_md, result, str(rel).replace("\\", "/"), src.suffix.lstrip("."))
+            _write_output(out_md, result, rel.as_posix(), src.suffix.lstrip("."))
             return ("succeeded", rel, None)
         except Exception as e:  # never abort the batch
             return ("failed", rel, f"{type(e).__name__}: {e}")
 
-    files = list(_iter_files(input_dir))
+    files = _iter_files(input_dir)
     with ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
-        for status, rel, err in pool.map(handle, files):
+        for future in as_completed(pool.submit(handle, src) for src in files):
+            status, rel, err = future.result()
             report[status] += 1
             if status == "failed":
-                report["failures"].append({"file": str(rel).replace("\\", "/"), "error": err})
+                report["failures"].append({"file": rel.as_posix(), "error": err})
 
     report_path.parent.mkdir(parents=True, exist_ok=True)
     report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")

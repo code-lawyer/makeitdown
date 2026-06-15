@@ -32,7 +32,7 @@ def _build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     args = _build_parser().parse_args(argv)
     input_dir = Path(args.input)
-    output_dir = Path(args.output) if args.output else Path(f"{args.input.rstrip('/').rstrip(chr(92))}_md")
+    output_dir = Path(args.output) if args.output else Path(f"{input_dir}_md")
     token = args.cloud_token or os.environ.get("PADDLEOCR_AISTUDIO_TOKEN")
     report_path = Path(args.report) if args.report else output_dir / "report.json"
 
