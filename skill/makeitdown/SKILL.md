@@ -37,37 +37,46 @@ There are two editions. **Do not pick for the user** — present both neutrally 
 
 Tell the user honestly: **Local is usually the most hassle-free for a non-technical user** (no account, no token, works offline), at the cost of disk space and speed. Cloud is lighter to install but requires obtaining a token, which is itself a hurdle. Then let them decide.
 
-### Step 2 — Make sure `uv` is installed
+### China network note (important — the target users are in mainland China)
 
-`uv` is the installer; it also auto-provisions the required Python (3.11). Check first:
+GitHub and PyPI are slow/flaky from China; build the install around domestic mirrors:
 
-```bash
-uv --version
-```
+- **Code** is installed from a **Gitee mirror**, not GitHub: `git+https://gitee.com/code-lawyer/makeitdown.git`. (Replace `code-lawyer` with the actual Gitee username if it differs.)
+- **Python dependencies** are pulled from the **Tsinghua PyPI mirror**: `https://pypi.tuna.tsinghua.edu.cn/simple`.
+- **PaddleOCR models** (Local edition) download from Baidu's domestic servers — these are fast in China, no mirror needed.
+- **uv's own auto-download of Python comes from GitHub** and may stall in China. So prefer an already-installed Python 3.11; only fall back to uv-managed Python if the machine has none.
 
-If not found, install it (pick the user's OS):
+### Step 2 — Make sure Python 3.11 and uv are present
 
-- **macOS:** `curl -LsSf https://astral.sh/uv/install.sh | sh`
-- **Windows (PowerShell):** `powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"`
+1. **Python 3.11** (the package needs ≥3.11, <3.13). Check `python --version`. If it's not 3.11/3.12, have the user install Python 3.11 via a domestic-friendly route (e.g. Miniconda from the Tsinghua mirror, or python.org). Relying on an existing interpreter avoids uv fetching Python from GitHub.
+2. **uv** — install it from the Tsinghua mirror (avoids astral.sh):
+   ```bash
+   pip install uv -i https://pypi.tuna.tsinghua.edu.cn/simple
+   ```
 
-After installing uv, you may need a new shell for it to be on PATH; if `uv` still isn't found, restart the shell or run `uv tool update-shell`.
+### Step 3 — Install the chosen edition (Gitee source + Tsinghua mirror)
 
-### Step 3 — Install the chosen edition
-
-Run **one** of these (uv fetches Python 3.11 automatically if missing):
+Run **one** of these:
 
 - **本地版 (Local):**
   ```bash
-  uv tool install --python 3.11 "makeitdown[local] @ git+https://github.com/code-lawyer/makeitdown.git"
+  uv tool install --python 3.11 --index https://pypi.tuna.tsinghua.edu.cn/simple "makeitdown[local] @ git+https://gitee.com/code-lawyer/makeitdown.git"
   ```
-  This pulls PaddleOCR + PaddlePaddle (a large download) — tell the user it may take several minutes. PaddleOCR models download on first conversion.
+  This pulls PaddleOCR + PaddlePaddle (a large download) — tell the user it may take several minutes. PaddleOCR models download on first conversion (from Baidu, fast in China).
 
 - **云端版 (Cloud):**
   ```bash
-  uv tool install --python 3.11 "makeitdown @ git+https://github.com/code-lawyer/makeitdown.git"
+  uv tool install --python 3.11 --index https://pypi.tuna.tsinghua.edu.cn/simple "makeitdown @ git+https://gitee.com/code-lawyer/makeitdown.git"
   ```
 
-Confirm it worked: `makeitdown --help`. If the command isn't on PATH yet, either run `uv tool update-shell` (then new shell) or invoke it via `uv tool run --from makeitdown makeitdown ...`.
+If uv gives trouble, the plain-pip fallback (needs an existing Python 3.11) works the same way:
+```bash
+pip install "makeitdown @ git+https://gitee.com/code-lawyer/makeitdown.git" -i https://pypi.tuna.tsinghua.edu.cn/simple
+```
+
+Confirm it worked: `makeitdown --help`. If the command isn't on PATH yet, run `uv tool update-shell` (then open a new shell) or invoke it via `uv tool run --from makeitdown makeitdown ...`.
+
+> Outside mainland China: drop `--index ...`/`-i ...` and use the GitHub URL `git+https://github.com/code-lawyer/makeitdown.git`.
 
 ### Step 4 — Cloud edition only: set the token
 
