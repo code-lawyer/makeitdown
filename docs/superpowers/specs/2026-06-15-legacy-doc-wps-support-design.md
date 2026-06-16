@@ -126,6 +126,20 @@ markitdown 只认 `.docx`，不认老式 `.doc`（OLE2 二进制）和 `.wps`（
   `skill/makeitdown/SKILL.md`（安装透明规矩 + 国内镜像）、`README.md`、
   `tests/test_router.py`、`tests/test_pipeline.py`
 
+## 已知缺口 / 后续（.wps 真二进制）
+
+真机验证了 `.doc`（OLE2 → Word COM）和 OOXML 假后缀两条路；`.wps` 的真二进制路径还没验。
+记录一条关键结论备忘：
+
+- 国内绝大多数 `.wps` 是**金山 WPS** 存的，内核就是 MS 兼容格式（OLE2 的 .doc 或 OOXML 的
+  .docx）。用户常用的"把 `.wps` 改名成 `.doc` 就能打开"之所以成立，**是因为 Word/WPS 按内容
+  嗅探、不只看后缀**——不是后缀本身的魔力。
+- 例外：真·微软 Works 的 `.wps`（很老、国内少见）是另一种格式，改名打不开，需 Works 转换器。
+- 对本工具的影响：`convert_legacy` 已按文件头嗅探分流，等于自动化了"改名"。**唯一要补的点**：
+  T2 现在把原始 `.wps` 路径直接交给 `Documents.Open()`，而 Word 可能因扩展名是 `.wps` 而
+  拒绝打开（即便内容是 OLE2）。实现 `.wps` 时的稳妥做法——**OLE2 内核的 `.wps` 先复制成临时
+  `.doc` 再交给 Word**（OOXML 内核已复制成临时 `.docx`，即 T1）。即把用户的手动改名自动化。
+
 ## 非目标
 
 纯 Python .doc 解析、老 `.xls`/`.ppt`/`.rtf`、自动安装任何外部程序、为 COM/LibreOffice
