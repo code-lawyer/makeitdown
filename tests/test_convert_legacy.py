@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import makeitdown.convert_legacy as cl
 from makeitdown.models import ConversionResult, LegacyConversionUnavailable
 
@@ -71,6 +73,27 @@ def test_ole2_no_backend_raises_with_actionable_hint(tmp_path, monkeypatch):
     except LegacyConversionUnavailable as e:
         msg = str(e)
         assert "WPS" in msg or "Office" in msg or "LibreOffice" in msg
+
+
+def test_convert_passes_absolute_path_to_backend(tmp_path, monkeypatch):
+    # External converters (Word COM, LibreOffice) resolve relative paths against
+    # their own working dir, not ours — convert() must hand them an absolute path.
+    monkeypatch.chdir(tmp_path)
+    rel = Path("old.doc")
+    rel.write_bytes(OLE2 + b"binary")
+
+    seen = {}
+    def fake_com(src, out_docx):
+        seen["src"] = src
+        out_docx.write_bytes(ZIP + b"converted")
+        return True
+    monkeypatch.setattr(cl, "_convert_via_com", fake_com)
+    monkeypatch.setattr(cl, "_convert_via_libreoffice", lambda src, out_dir: None)
+    monkeypatch.setattr(cl, "convert_native",
+                        lambda p: ConversionResult(text="# ok", engine="markitdown"))
+
+    cl.convert(rel)  # relative path in
+    assert Path(seen["src"]).is_absolute()
 
 
 def test_com_short_circuits_off_windows(tmp_path, monkeypatch):

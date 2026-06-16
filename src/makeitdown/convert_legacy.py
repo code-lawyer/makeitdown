@@ -110,7 +110,9 @@ def _relabel(result: ConversionResult, engine: str) -> ConversionResult:
 
 
 def convert(path: Path) -> ConversionResult:
-    src = Path(path)
+    # Resolve to absolute: Word COM and LibreOffice resolve relative paths against
+    # their own working directory, not ours, so a relative path would not be found.
+    src = Path(path).resolve()
     kind = _sniff(src)
     with tempfile.TemporaryDirectory() as td:
         td_path = Path(td)
