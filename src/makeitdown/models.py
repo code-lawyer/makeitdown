@@ -20,3 +20,8 @@ class ConversionResult:
 
 class OCRUnavailableError(RuntimeError):
     """Raised when no usable OCR backend is configured/available."""
+
+
+class LegacyConversionUnavailable(RuntimeError):
+    """Raised when a legacy binary (.doc/.wps) can't be converted because no
+    backend is available. Carries an actionable hint for the user."""

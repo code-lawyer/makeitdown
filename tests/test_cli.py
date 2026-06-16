@@ -10,7 +10,7 @@ def test_cli_wires_args_to_convert_tree(tmp_path, monkeypatch):
         captured["output_dir"] = Path(output_dir)
         captured.update(kw)
         return {"succeeded": 0, "warned": 0, "failed": 0, "skipped_existing": 0,
-                "skipped_unsupported": 0, "failures": [], "warnings": []}
+                "skipped_unsupported": 0, "failures": [], "warnings": [], "skipped": []}
 
     monkeypatch.setattr(cli, "convert_tree", fake_convert_tree)
     monkeypatch.delenv("PADDLEOCR_AISTUDIO_TOKEN", raising=False)
@@ -31,7 +31,7 @@ def test_cli_defaults_output_and_reads_token_from_env(tmp_path, monkeypatch):
                         lambda input_dir, output_dir, **kw: captured.update(
                             {"output_dir": Path(output_dir), **kw}) or
                         {"succeeded": 0, "warned": 0, "failed": 0, "skipped_existing": 0,
-                         "skipped_unsupported": 0, "failures": [], "warnings": []})
+                         "skipped_unsupported": 0, "failures": [], "warnings": [], "skipped": []})
     monkeypatch.setenv("PADDLEOCR_AISTUDIO_TOKEN", "ENVTKN")
 
     rc = cli.main(["docs"])
@@ -43,7 +43,7 @@ def test_cli_defaults_output_and_reads_token_from_env(tmp_path, monkeypatch):
 
 def _report(**over):
     base = {"succeeded": 0, "warned": 0, "failed": 0, "skipped_existing": 0,
-            "skipped_unsupported": 0, "failures": [], "warnings": []}
+            "skipped_unsupported": 0, "failures": [], "warnings": [], "skipped": []}
     base.update(over)
     return base
 
@@ -76,3 +76,14 @@ def test_cli_summary_includes_warned(monkeypatch, capsys):
     cli.main(["in"])
     out = capsys.readouterr().out
     assert "warned=2" in out
+
+
+def test_cli_notes_actionable_skips(monkeypatch, capsys):
+    skipped = [{"file": "a.doc", "reason": "needs WPS/Office or LibreOffice"}]
+    monkeypatch.setattr(cli, "convert_tree",
+                        lambda input_dir, output_dir, **kw: _report(skipped_unsupported=1,
+                                                                    skipped=skipped))
+    monkeypatch.delenv("PADDLEOCR_AISTUDIO_TOKEN", raising=False)
+    cli.main(["in"])
+    err = capsys.readouterr().err
+    assert "1 file(s)" in err and "report" in err.lower()

@@ -22,6 +22,13 @@ def test_unsupported_extension(tmp_path):
     assert router.classify(p) == "unsupported"
 
 
+def test_legacy_binary_extensions(tmp_path):
+    for name in ["a.doc", "b.wps"]:
+        p = tmp_path / name
+        p.write_bytes(b"\x00")
+        assert router.classify(p) == "legacy"
+
+
 def test_pdf_with_text_layer_is_native(tmp_path, monkeypatch):
     p = tmp_path / "doc.pdf"
     p.write_bytes(b"%PDF-1.4")

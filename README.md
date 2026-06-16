@@ -9,6 +9,8 @@
 - 递归扫描输入目录，按文件类型自动路由：
   - **原生文档**（Word/Excel/PPT、HTML、csv/json/xml、txt/md、epub、**有文字层的 PDF**）→ markitdown
   - **扫描件 / 图片型 PDF / 图片**（png/jpg/bmp/tiff…）→ PaddleOCR
+  - **老式 .doc / .wps** → 先嗅探内核：实为 .docx 的直接转；真二进制用已装的 Word/WPS 或
+    LibreOffice（见下文「老式 .doc / .wps」）
 - 输出**镜像输入目录结构**的 `.md`，每个文件带 YAML frontmatter（`source` / `source_type` / `engine` / `pages` / `converted_at`），便于溯源与 Obsidian Dataview。
 - 单文件出错不中断整批，结果汇总到 `report.json`。
 
@@ -107,6 +109,25 @@ makeitdown docs --ocr-engine cloud
 - 阈值都可用上面的 `--warn-*` 选项调整；`--no-quality-check` 可整体关闭。
 
 `report.json` 中 `succeeded` 与 `warned` 互斥：前者是产出且干净，后者是产出但可疑。
+
+### 老式 .doc / .wps
+
+`.doc`（老 Word 二进制）和 `.wps`（金山）markitdown 读不了，makeitdown 会分层处理：
+
+1. **内容嗅探（零依赖）**：很多"`.doc`/`.wps`"其实是改了后缀的 `.docx`（OOXML）——直接当
+   `.docx` 转，无需任何外部工具。
+2. **已装的 Word / WPS（Windows）**：真二进制文件，调用本机**已安装**的 Word 或金山 WPS
+   转换。需装可选依赖 `makeitdown[com]`（只装 COM 桥，不装 Office）：
+   ```bash
+   uv tool install --python 3.11 --index https://pypi.tuna.tsinghua.edu.cn/simple \
+     "makeitdown[com] @ git+https://gitee.com/code-lawyer/makeitdown.git"
+   ```
+3. **LibreOffice（可选）**：若 `soffice` 已在 PATH，则用它转换（跨平台）。makeitdown
+   **不会自动安装 LibreOffice**；需要的话请自行安装（国内走清华/中科大镜像）。
+4. **都没有**：该文件不会被硬转成垃圾，而是**干净跳过**并记入 `report.json` 的 `skipped`，
+   附上"怎样才能转成功"的说明。
+
+> makeitdown 自身从不静默安装任何外部程序；要不要装 LibreOffice 完全由你决定。
 
 ## 输出示例
 

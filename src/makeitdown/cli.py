@@ -78,6 +78,9 @@ def main(argv: list[str] | None = None) -> int:
     if report["warned"]:
         print(f"{report['warned']} file(s) flagged for quality. See {report_path}.",
               file=sys.stderr)
+    if report.get("skipped"):
+        print(f"{len(report['skipped'])} file(s) need an external converter "
+              f"(see {report_path} for how to convert them).", file=sys.stderr)
     if report["failed"]:
         print(f"See {report_path} for {report['failed']} failure(s).", file=sys.stderr)
     return 0

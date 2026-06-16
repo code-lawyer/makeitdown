@@ -5,6 +5,9 @@ NATIVE_EXTS = {
     ".csv", ".json", ".xml", ".txt", ".md", ".epub",
 }
 IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff", ".gif", ".webp"}
+# Legacy/ambiguous formats markitdown can't read directly. Routed to the legacy
+# converter, which sniffs the real container (OOXML vs OLE2) and picks a backend.
+LEGACY_BINARY_EXTS = {".doc", ".wps"}
 
 
 def _pdf_avg_chars_per_page(path: Path) -> float:
@@ -26,7 +29,7 @@ def _pdf_avg_chars_per_page(path: Path) -> float:
 
 
 def classify(path: Path, text_threshold: int = 50) -> str:
-    """Return one of "native", "ocr", "unsupported"."""
+    """Return one of "native", "ocr", "legacy", "unsupported"."""
     ext = path.suffix.lower()
     if ext == ".pdf":
         return "native" if _pdf_avg_chars_per_page(path) >= text_threshold else "ocr"
@@ -34,4 +37,6 @@ def classify(path: Path, text_threshold: int = 50) -> str:
         return "native"
     if ext in IMAGE_EXTS:
         return "ocr"
+    if ext in LEGACY_BINARY_EXTS:
+        return "legacy"
     return "unsupported"

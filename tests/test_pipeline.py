@@ -1,7 +1,7 @@
 import json
 from pathlib import Path
 import makeitdown.pipeline as pl
-from makeitdown.models import ConversionResult
+from makeitdown.models import ConversionResult, LegacyConversionUnavailable
 
 
 def _setup_tree(tmp_path):
@@ -149,6 +149,45 @@ def test_no_quality_check_disables_warnings(tmp_path, monkeypatch):
     assert report["succeeded"] == 1
     assert report["warned"] == 0
     assert "quality:" not in (out / "a.md").read_text(encoding="utf-8")
+
+
+def test_legacy_route_converts_like_native(tmp_path, monkeypatch):
+    src = tmp_path / "in"
+    src.mkdir()
+    (src / "a.doc").write_bytes(b"\xd0\xcf\x11\xe0")
+    out = tmp_path / "out"
+    monkeypatch.setattr(pl, "classify", lambda p, text_threshold=50: "legacy")
+    monkeypatch.setattr(pl, "convert_legacy",
+                        lambda p: ConversionResult(text="正常的合同正文内容" * 5,
+                                                   engine="legacy:com->markitdown"))
+
+    report = pl.convert_tree(src, out, ocr_engine="auto", ocr_model="PP-StructureV3",
+                             cloud_token=None, workers=1, skip_existing=False,
+                             text_threshold=50, report_path=out / "report.json")
+    assert report["succeeded"] == 1
+    md = (out / "a.md").read_text(encoding="utf-8")
+    assert "engine: legacy:com->markitdown" in md
+
+
+def test_legacy_unavailable_is_skipped_with_hint(tmp_path, monkeypatch):
+    src = tmp_path / "in"
+    src.mkdir()
+    (src / "a.doc").write_bytes(b"\xd0\xcf\x11\xe0")
+    out = tmp_path / "out"
+    monkeypatch.setattr(pl, "classify", lambda p, text_threshold=50: "legacy")
+
+    def unavailable(p):
+        raise LegacyConversionUnavailable("install WPS/Office or LibreOffice")
+    monkeypatch.setattr(pl, "convert_legacy", unavailable)
+
+    report = pl.convert_tree(src, out, ocr_engine="auto", ocr_model="PP-StructureV3",
+                             cloud_token=None, workers=1, skip_existing=False,
+                             text_threshold=50, report_path=out / "report.json")
+    assert report["skipped_unsupported"] == 1
+    assert report["failed"] == 0
+    assert not (out / "a.md").exists()
+    assert report["skipped"][0]["file"] == "a.doc"
+    assert "LibreOffice" in report["skipped"][0]["reason"]
 
 
 def test_skip_existing_skips_up_to_date_output(tmp_path, monkeypatch):

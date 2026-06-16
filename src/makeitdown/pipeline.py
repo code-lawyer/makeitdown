@@ -3,9 +3,11 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from pathlib import Path
 
+from .convert_legacy import convert as convert_legacy
 from .convert_native import convert as convert_native
 from .convert_ocr import OCRDispatcher
 from .frontmatter import build_frontmatter, prepend_frontmatter
+from .models import LegacyConversionUnavailable
 from .quality import QualityThresholds, assess
 from .router import classify
 
@@ -64,6 +66,7 @@ def convert_tree(
         "skipped_unsupported": 0,
         "failures": [],
         "warnings": [],
+        "skipped": [],
     }
 
     def _quality_reasons(result, source_type: str) -> list[str]:
@@ -89,6 +92,8 @@ def convert_tree(
             source_type = src.suffix.lstrip(".")
             if route == "native":
                 result = convert_native(src)
+            elif route == "legacy":
+                result = convert_legacy(src)
             else:
                 result = dispatcher.convert(src)
             reasons = _quality_reasons(result, source_type)
@@ -97,6 +102,9 @@ def convert_tree(
             if reasons:
                 return ("warned", rel, reasons)
             return ("succeeded", rel, None)
+        except LegacyConversionUnavailable as e:
+            # Recognized but no converter available: skip knowingly with a hint.
+            return ("skipped_unsupported", rel, str(e))
         except Exception as e:  # never abort the batch
             return ("failed", rel, f"{type(e).__name__}: {e}")
 
@@ -109,6 +117,8 @@ def convert_tree(
                 report["failures"].append({"file": rel.as_posix(), "error": detail})
             elif status == "warned":
                 report["warnings"].append({"file": rel.as_posix(), "reasons": detail})
+            elif status == "skipped_unsupported" and detail:
+                report["skipped"].append({"file": rel.as_posix(), "reason": detail})
 
     report_path.parent.mkdir(parents=True, exist_ok=True)
     report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")

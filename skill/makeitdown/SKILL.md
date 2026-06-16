@@ -112,6 +112,29 @@ env `PADDLEOCR_AISTUDIO_TOKEN` (or `--cloud-token`).
 - `--workers N` — concurrency.
 - `--text-threshold N` — avg chars/page below which a PDF is treated as scanned.
 
+## Legacy .doc / .wps files (install transparency — read before acting)
+
+makeitdown handles old `.doc` and `.wps` by first sniffing the real container:
+a file that is actually OOXML (a renamed `.docx`) is converted with zero extra
+tooling. Only genuine legacy binaries need an external converter, and here you
+MUST be transparent with the user:
+
+- **Never silently install anything.** Conversion of true `.doc`/`.wps` binaries
+  uses, in order: (1) an **already-installed** Microsoft Word or Kingsoft WPS on
+  Windows (via the optional `makeitdown[com]` extra — the COM bridge drives an app
+  the user already has, it installs no office suite); (2) **LibreOffice only if
+  `soffice` is already on PATH**. makeitdown itself installs neither.
+- **LibreOffice is a several-hundred-MB download.** If the user has no Word/WPS and
+  wants those files converted, explain in plain language what LibreOffice is, the
+  rough size, why it's needed, and where to get it — then install it **only after
+  explicit consent**. Do not decide for them. In mainland China, point them at a
+  domestic mirror (e.g. Tsinghua/USTC LibreOffice mirror), not the official site.
+- **Relay the skip report.** Files that couldn't be converted appear in
+  `report.json` under `skipped` with a `reason`. Read those reasons back to the
+  user so they can choose how to proceed (install WPS/Office, or LibreOffice).
+- The `makeitdown[com]` extra installs from the **Tsinghua PyPI mirror** like the
+  rest (`-i https://pypi.tuna.tsinghua.edu.cn/simple`).
+
 ## When to use
 
 The user wants to turn a directory of documents/case files/papers/reports into
