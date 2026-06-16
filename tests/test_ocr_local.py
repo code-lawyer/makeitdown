@@ -29,3 +29,36 @@ def test_convert_uses_injected_engine(tmp_path):
     assert result.text == "# local md"
     assert result.engine == "local:pp-structurev3"
     assert result.pages == 1
+    assert result.assets == {}
+
+
+def test_convert_collects_image_assets(tmp_path):
+    f = tmp_path / "scan.pdf"
+    f.write_bytes(b"%PDF-1.4")
+
+    class _FakeEngine:
+        def predict(self, src):
+            return [
+                {"markdown": {"text": "# p1", "images": {"imgs/a.png": b"PNGBYTES"}}},
+                {"markdown": {"text": "# p2"}},
+            ]
+
+    client = ol.LocalOCR()
+    client._engine = _FakeEngine()
+    result = client.convert(f)
+    assert result.pages == 2
+    assert result.assets == {"imgs/a.png": b"PNGBYTES"}
+
+
+def test_vl_model_label(tmp_path):
+    f = tmp_path / "scan.png"
+    f.write_bytes(b"\x89PNG")
+
+    class _FakeEngine:
+        def predict(self, src):
+            return [{"markdown": {"text": "vl"}}]
+
+    client = ol.LocalOCR(model="PaddleOCR-VL")
+    client._engine = _FakeEngine()
+    result = client.convert(f)
+    assert result.engine == "local:paddleocr-vl"
