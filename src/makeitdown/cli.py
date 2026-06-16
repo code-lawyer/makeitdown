@@ -4,6 +4,7 @@ import sys
 from pathlib import Path
 
 from .pipeline import convert_tree
+from .quality import QualityThresholds
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -27,6 +28,18 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--text-threshold", type=int, default=50,
                    help="avg chars/page below which a PDF is treated as scanned")
     p.add_argument("--report", default=None, help="path to report.json")
+    p.add_argument("--no-quality-check", dest="quality_check", action="store_false",
+                   help="disable output quality checks (treat all output as clean)")
+    # Defaults sourced from QualityThresholds so there is one source of truth.
+    qt = QualityThresholds()
+    p.add_argument("--warn-min-chars", type=int, default=qt.min_chars,
+                   help="warn if non-whitespace char count is below this")
+    p.add_argument("--warn-min-chars-per-page", type=int, default=qt.min_chars_per_page,
+                   help="warn if avg chars/page (multi-page docs) is below this")
+    p.add_argument("--warn-garbled-ratio", type=float, default=qt.garbled_ratio,
+                   help="warn if garbled-character ratio exceeds this (0-1)")
+    p.add_argument("--warn-repeat-count", type=int, default=qt.repeat_count,
+                   help="warn if a line repeats more than this many times")
     return p
 
 
@@ -37,6 +50,13 @@ def main(argv: list[str] | None = None) -> int:
     token = args.cloud_token or os.environ.get("PADDLEOCR_AISTUDIO_TOKEN")
     report_path = Path(args.report) if args.report else output_dir / "report.json"
 
+    thresholds = QualityThresholds(
+        min_chars=args.warn_min_chars,
+        min_chars_per_page=args.warn_min_chars_per_page,
+        garbled_ratio=args.warn_garbled_ratio,
+        repeat_count=args.warn_repeat_count,
+    )
+
     report = convert_tree(
         input_dir, output_dir,
         ocr_engine=args.ocr_engine,
@@ -46,13 +66,18 @@ def main(argv: list[str] | None = None) -> int:
         skip_existing=args.skip_existing,
         text_threshold=args.text_threshold,
         report_path=report_path,
+        quality_check=args.quality_check,
+        quality_thresholds=thresholds,
     )
 
     print(
-        f"Done. succeeded={report['succeeded']} failed={report['failed']} "
-        f"skipped_existing={report['skipped_existing']} "
+        f"Done. succeeded={report['succeeded']} warned={report['warned']} "
+        f"failed={report['failed']} skipped_existing={report['skipped_existing']} "
         f"skipped_unsupported={report['skipped_unsupported']}"
     )
+    if report["warned"]:
+        print(f"{report['warned']} file(s) flagged for quality. See {report_path}.",
+              file=sys.stderr)
     if report["failed"]:
         print(f"See {report_path} for {report['failed']} failure(s).", file=sys.stderr)
     return 0

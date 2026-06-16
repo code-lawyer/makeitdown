@@ -15,8 +15,14 @@ def build_frontmatter(
     engine: str,
     pages: int | None,
     converted_at: str,
+    warnings: list[str] | None = None,
 ) -> str:
-    """Return a YAML frontmatter block ending in a newline."""
+    """Return a YAML frontmatter block ending in a newline.
+
+    When ``warnings`` is non-empty the block carries ``quality: suspect`` and a
+    ``warnings`` YAML sequence so the flag travels with the file into the
+    knowledge base. Clean files look exactly as before (no extra keys).
+    """
     lines = ["---"]
     lines.append(f"source: {_yaml_value(source)}")
     lines.append(f"source_type: {_yaml_value(source_type)}")
@@ -24,6 +30,11 @@ def build_frontmatter(
     if pages is not None:
         lines.append(f"pages: {pages}")
     lines.append(f"converted_at: {_yaml_value(converted_at)}")
+    if warnings:
+        lines.append("quality: suspect")
+        lines.append("warnings:")
+        for reason in warnings:
+            lines.append(f"  - {_yaml_value(reason)}")
     lines.append("---")
     return "\n".join(lines) + "\n"
 

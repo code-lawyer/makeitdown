@@ -56,7 +56,7 @@ assess(text: str, *, source_type: str, pages: int | None,
 | 规则 | 触发条件（默认阈值，可调） | 示例原因串 |
 |---|---|---|
 | 近乎空白 | 有意义字符总数 < `min_chars`（默认 20） | `near-empty output (8 chars)` |
-| 每页字符过低 | 仅当 `pages` 已知且 > 0：总字符 / 页数 < `min_chars_per_page`（默认 50） | `avg 12 chars/page over 30 pages` |
+| 每页字符过低 | 仅当 `pages` 已知且 **≥ 2**：总字符 / 页数 < `min_chars_per_page`（默认 50） | `avg 12 chars/page over 30 pages` |
 | 乱码比例高 | 替换符(U+FFFD)+控制符+异常符号 占非空白字符 > `garbled_ratio`（默认 0.02） | `garbled-char ratio 7.3%` |
 | 异常重复 | 某条长度 > 10 的非空行重复 > `repeat_count`（默认 30）次 | `line repeated 142x (possible OCR loop)` |
 
@@ -68,6 +68,8 @@ assess(text: str, *, source_type: str, pages: int | None,
 - **故意不做语言检测**（如"中文文档却没中文就报警"）。法律场景有大量纯英文合同、
   纯数字财务表，语言检测会狂误报；"乱码比例"已能抓真正的乱码，更稳。
 - **重复阈值调高到 30**：判决书/合同的页眉页脚、表格本就重复，低了会误报。
+- **每页字符规则要求 pages ≥ 2**：单页文档可能本就很短（封面、单页通知），只在
+  多页文档上判"每页几乎没字"才有意义，否则会误报短的单页件。
 - "异常符号"定义：非空白且不属于 {CJK、字母、数字、常见标点} 的字符。
 
 ## 数据落地

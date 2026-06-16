@@ -6,6 +6,7 @@ from pathlib import Path
 from .convert_native import convert as convert_native
 from .convert_ocr import OCRDispatcher
 from .frontmatter import build_frontmatter, prepend_frontmatter
+from .quality import QualityThresholds, assess
 from .router import classify
 
 
@@ -17,7 +18,8 @@ def _is_up_to_date(src: Path, md: Path) -> bool:
     return md.exists() and md.stat().st_mtime >= src.stat().st_mtime
 
 
-def _write_output(out_md: Path, result, source_rel: str, source_type: str):
+def _write_output(out_md: Path, result, source_rel: str, source_type: str,
+                  warnings: list[str] | None = None):
     out_md.parent.mkdir(parents=True, exist_ok=True)
     fm = build_frontmatter(
         source=source_rel,
@@ -25,6 +27,7 @@ def _write_output(out_md: Path, result, source_rel: str, source_type: str):
         engine=result.engine,
         pages=result.pages,
         converted_at=datetime.now().isoformat(timespec="seconds"),
+        warnings=warnings,
     )
     out_md.write_text(prepend_frontmatter(result.text, fm), encoding="utf-8")
     for rel, data in result.assets.items():
@@ -44,6 +47,8 @@ def convert_tree(
     skip_existing: bool,
     text_threshold: int,
     report_path: Path,
+    quality_check: bool = True,
+    quality_thresholds: QualityThresholds | None = None,
 ) -> dict:
     input_dir = Path(input_dir)
     output_dir = Path(output_dir)
@@ -53,11 +58,23 @@ def convert_tree(
 
     report = {
         "succeeded": 0,
+        "warned": 0,
         "failed": 0,
         "skipped_existing": 0,
         "skipped_unsupported": 0,
         "failures": [],
+        "warnings": [],
     }
+
+    def _quality_reasons(result, source_type: str) -> list[str]:
+        # A buggy quality checker must never lose a successful conversion.
+        if not quality_check:
+            return []
+        try:
+            return assess(result.text, source_type=source_type,
+                          pages=result.pages, thresholds=quality_thresholds)
+        except Exception:
+            return []
 
     def handle(src: Path):
         rel = src.relative_to(input_dir)
@@ -69,11 +86,16 @@ def convert_tree(
         if route == "unsupported":
             return ("skipped_unsupported", rel, None)
         try:
+            source_type = src.suffix.lstrip(".")
             if route == "native":
                 result = convert_native(src)
             else:
                 result = dispatcher.convert(src)
-            _write_output(out_md, result, rel.as_posix(), src.suffix.lstrip("."))
+            reasons = _quality_reasons(result, source_type)
+            _write_output(out_md, result, rel.as_posix(), source_type,
+                          warnings=reasons)
+            if reasons:
+                return ("warned", rel, reasons)
             return ("succeeded", rel, None)
         except Exception as e:  # never abort the batch
             return ("failed", rel, f"{type(e).__name__}: {e}")
@@ -81,10 +103,12 @@ def convert_tree(
     files = _iter_files(input_dir)
     with ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
         for future in as_completed(pool.submit(handle, src) for src in files):
-            status, rel, err = future.result()
+            status, rel, detail = future.result()
             report[status] += 1
             if status == "failed":
-                report["failures"].append({"file": rel.as_posix(), "error": err})
+                report["failures"].append({"file": rel.as_posix(), "error": detail})
+            elif status == "warned":
+                report["warnings"].append({"file": rel.as_posix(), "reasons": detail})
 
     report_path.parent.mkdir(parents=True, exist_ok=True)
     report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")

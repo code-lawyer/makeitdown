@@ -21,11 +21,13 @@ def test_convert_tree_writes_mirrored_md_and_report(tmp_path, monkeypatch):
                         lambda p, text_threshold=50: {"docx": "native", "png": "ocr"}.get(
                             p.suffix.lstrip("."), "unsupported"))
     monkeypatch.setattr(pl, "convert_native",
-                        lambda p: ConversionResult(text="# native", engine="markitdown"))
+                        lambda p: ConversionResult(text="# native\n\n" + "正常的文档内容" * 5,
+                                                   engine="markitdown"))
 
     class _Disp:
         def __init__(self, **k): pass
-        def convert(self, p): return ConversionResult(text="# ocr", engine="local:pp-structurev3")
+        def convert(self, p): return ConversionResult(text="# ocr\n\n" + "正常的文档内容" * 5,
+                                                      engine="local:pp-structurev3")
 
     monkeypatch.setattr(pl, "OCRDispatcher", _Disp)
 
@@ -56,7 +58,7 @@ def test_convert_tree_records_failures_without_aborting(tmp_path, monkeypatch):
     def flaky(p):
         if p.name == "a.docx":
             raise ValueError("broken file")
-        return ConversionResult(text="# ok", engine="markitdown")
+        return ConversionResult(text="# ok\n\n" + "正常的文档内容" * 5, engine="markitdown")
 
     monkeypatch.setattr(pl, "convert_native", flaky)
 
@@ -68,6 +70,85 @@ def test_convert_tree_records_failures_without_aborting(tmp_path, monkeypatch):
     assert (out / "c.md").exists()
     assert not (out / "a.md").exists()
     assert any("broken file" in f["error"] for f in report["failures"])
+
+
+def _single_docx(tmp_path):
+    src = tmp_path / "in"
+    src.mkdir()
+    (src / "a.docx").write_text("x", encoding="utf-8")
+    return src
+
+
+def test_garbage_output_flagged_as_warned(tmp_path, monkeypatch):
+    src = _single_docx(tmp_path)
+    out = tmp_path / "out"
+    monkeypatch.setattr(pl, "classify", lambda p, text_threshold=50: "native")
+    monkeypatch.setattr(pl, "convert_native",
+                        lambda p: ConversionResult(text="x", engine="markitdown"))
+
+    report = pl.convert_tree(src, out, ocr_engine="auto", ocr_model="PP-StructureV3",
+                             cloud_token=None, workers=1, skip_existing=False,
+                             text_threshold=50, report_path=out / "report.json")
+
+    assert report["succeeded"] == 0
+    assert report["warned"] == 1
+    assert (out / "a.md").exists()  # output is kept, not lost
+    md = (out / "a.md").read_text(encoding="utf-8")
+    assert "quality: suspect" in md
+    assert report["warnings"][0]["file"] == "a.docx"
+    assert any("near-empty" in r for r in report["warnings"][0]["reasons"])
+
+
+def test_clean_output_not_warned(tmp_path, monkeypatch):
+    src = _single_docx(tmp_path)
+    out = tmp_path / "out"
+    monkeypatch.setattr(pl, "classify", lambda p, text_threshold=50: "native")
+    monkeypatch.setattr(pl, "convert_native",
+                        lambda p: ConversionResult(text="正常的中文合同内容" * 5,
+                                                   engine="markitdown"))
+
+    report = pl.convert_tree(src, out, ocr_engine="auto", ocr_model="PP-StructureV3",
+                             cloud_token=None, workers=1, skip_existing=False,
+                             text_threshold=50, report_path=out / "report.json")
+    assert report["succeeded"] == 1
+    assert report["warned"] == 0
+    assert "quality:" not in (out / "a.md").read_text(encoding="utf-8")
+
+
+def test_quality_check_failure_is_non_fatal(tmp_path, monkeypatch):
+    src = _single_docx(tmp_path)
+    out = tmp_path / "out"
+    monkeypatch.setattr(pl, "classify", lambda p, text_threshold=50: "native")
+    monkeypatch.setattr(pl, "convert_native",
+                        lambda p: ConversionResult(text="正常内容" * 10, engine="markitdown"))
+
+    def boom(*a, **k):
+        raise RuntimeError("quality checker bug")
+    monkeypatch.setattr(pl, "assess", boom)
+
+    report = pl.convert_tree(src, out, ocr_engine="auto", ocr_model="PP-StructureV3",
+                             cloud_token=None, workers=1, skip_existing=False,
+                             text_threshold=50, report_path=out / "report.json")
+    # A buggy checker must never lose a successful conversion.
+    assert report["succeeded"] == 1
+    assert report["failed"] == 0
+    assert (out / "a.md").exists()
+
+
+def test_no_quality_check_disables_warnings(tmp_path, monkeypatch):
+    src = _single_docx(tmp_path)
+    out = tmp_path / "out"
+    monkeypatch.setattr(pl, "classify", lambda p, text_threshold=50: "native")
+    monkeypatch.setattr(pl, "convert_native",
+                        lambda p: ConversionResult(text="x", engine="markitdown"))
+
+    report = pl.convert_tree(src, out, ocr_engine="auto", ocr_model="PP-StructureV3",
+                             cloud_token=None, workers=1, skip_existing=False,
+                             text_threshold=50, report_path=out / "report.json",
+                             quality_check=False)
+    assert report["succeeded"] == 1
+    assert report["warned"] == 0
+    assert "quality:" not in (out / "a.md").read_text(encoding="utf-8")
 
 
 def test_skip_existing_skips_up_to_date_output(tmp_path, monkeypatch):

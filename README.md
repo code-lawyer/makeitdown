@@ -89,6 +89,24 @@ makeitdown docs --ocr-engine cloud
 | `--skip-existing` | 输出比源文件新则跳过（轻量增量） |
 | `--text-threshold N` | PDF 判定为扫描件的每页平均字符数阈值（默认 50） |
 | `--report PATH` | report.json 路径 |
+| `--no-quality-check` | 关闭输出质检（所有产出按正常处理） |
+| `--warn-min-chars N` | 非空白字符数低于此值则警告（默认 20） |
+| `--warn-min-chars-per-page N` | 多页文档每页平均字符数低于此值则警告（默认 50） |
+| `--warn-garbled-ratio F` | 乱码字符比例超过此值则警告（默认 0.02） |
+| `--warn-repeat-count N` | 某行重复超过此次数则警告（默认 30） |
+
+### 质检与异常警告
+
+转换**成功但结果可疑**的文件（整页空白、乱码、内容异常重复、多页却几乎没字），不会被
+当作正常结果悄悄写出，而是会被**标记**——既进 `report.json` 的 `warnings`，也写进该 `.md`
+的 frontmatter（`quality: suspect` + `warnings` 列表），警告随文件进入下游知识库。
+
+- **只警告、不改内容**：质检永不修改或删除你的转换结果，最坏只是误报一个标记。
+- **硬失败**（转换直接报错）仍按原样隔离：不产出 `.md`，记入 `report.json` 的 `failures`，
+  单文件出错不中断整批。
+- 阈值都可用上面的 `--warn-*` 选项调整；`--no-quality-check` 可整体关闭。
+
+`report.json` 中 `succeeded` 与 `warned` 互斥：前者是产出且干净，后者是产出但可疑。
 
 ## 输出示例
 
