@@ -33,19 +33,29 @@ class LocalOCR:
     def engine_label(self) -> str:
         return f"local:{self.model.lower()}"
 
+    def _engine_class(self):
+        # Honour the requested model. PaddleOCR-VL is a separate pipeline class
+        # from PP-StructureV3; both expose .predict() returning per-page results
+        # whose .markdown dict has "markdown_texts" and "markdown_images".
+        if "vl" in self.model.lower():
+            from paddleocr import PaddleOCRVL  # noqa: PLC0415
+
+            return PaddleOCRVL
+        from paddleocr import PPStructureV3  # noqa: PLC0415
+
+        return PPStructureV3
+
     def _ensure_engine(self):
         if self._engine is None:
-            # Honour the requested model. PaddleOCR-VL is a separate pipeline
-            # class from PP-StructureV3; both expose .predict() returning per-page
-            # results with ["markdown"]["text"] (and an optional ["images"] map).
-            if "vl" in self.model.lower():
-                from paddleocr import PaddleOCRVL  # noqa: PLC0415
-
-                self._engine = PaddleOCRVL()
-            else:
-                from paddleocr import PPStructureV3  # noqa: PLC0415
-
-                self._engine = PPStructureV3()
+            cls = self._engine_class()
+            # Disable oneDNN/MKLDNN: paddle 3.x crashes in the oneDNN executor
+            # on some models/CPUs ("ConvertPirAttribute2RuntimeAttribute not
+            # support"). Reliability over speed. Fall back if a pipeline class
+            # doesn't accept the kwarg.
+            try:
+                self._engine = cls(enable_mkldnn=False)
+            except TypeError:
+                self._engine = cls()
         return self._engine
 
     @staticmethod
@@ -59,7 +69,7 @@ class LocalOCR:
         import io
 
         assets: dict[str, bytes] = {}
-        for rel, img in (markdown.get("images") or {}).items():
+        for rel, img in (markdown.get("markdown_images") or {}).items():
             try:
                 if isinstance(img, (bytes, bytearray)):
                     assets[rel] = bytes(img)
@@ -74,14 +84,16 @@ class LocalOCR:
     def convert(self, path: Path) -> ConversionResult:
         with self._lock:
             engine = self._ensure_engine()
-            results = engine.predict(str(path))
-            parts = [r["markdown"]["text"] for r in results]
+            results = list(engine.predict(str(path)))
+            parts: list[str] = []
             assets: dict[str, bytes] = {}
             for r in results:
-                assets.update(self._extract_assets(r["markdown"]))
+                md = r.markdown  # paddlex result: dict with markdown_texts/images
+                parts.append(md["markdown_texts"])
+                assets.update(self._extract_assets(md))
         return ConversionResult(
             text="\n\n".join(parts),
             engine=self.engine_label,
-            pages=len(parts),
+            pages=len(results),
             assets=assets,
         )
