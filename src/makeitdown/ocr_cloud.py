@@ -13,10 +13,13 @@ DEFAULT_MODEL = "PaddleOCR-VL-1.6"
 class CloudOCR:
     """Client for the PaddleOCR AI Studio job-based HTTP API."""
 
-    def __init__(self, token: str, model: str | None = None, poll_interval: float = 5.0):
+    def __init__(self, token: str, model: str | None = None, poll_interval: float = 5.0,
+                 request_timeout: float = 60.0, max_poll_seconds: float = 1800.0):
         self.token = token
         self.model = model or DEFAULT_MODEL
         self.poll_interval = poll_interval
+        self.request_timeout = request_timeout
+        self.max_poll_seconds = max_poll_seconds
 
     @property
     def engine_label(self) -> str:
@@ -34,14 +37,17 @@ class CloudOCR:
         data = {"model": self.model, "optionalPayload": json.dumps(optional)}
         with open(path, "rb") as fh:
             resp = requests.post(JOB_URL, headers=self._headers(),
-                                 data=data, files={"file": fh})
+                                 data=data, files={"file": fh},
+                                 timeout=self.request_timeout)
         if resp.status_code != 200:
             raise RuntimeError(f"job submit failed ({resp.status_code}): {resp.text}")
         return resp.json()["data"]["jobId"]
 
     def _poll(self, job_id: str) -> str:
+        start = time.monotonic()
         while True:
-            resp = requests.get(f"{JOB_URL}/{job_id}", headers=self._headers())
+            resp = requests.get(f"{JOB_URL}/{job_id}", headers=self._headers(),
+                                timeout=self.request_timeout)
             if resp.status_code != 200:
                 raise RuntimeError(f"job poll failed ({resp.status_code}): {resp.text}")
             data = resp.json()["data"]
@@ -50,10 +56,14 @@ class CloudOCR:
                 return data["resultUrl"]["jsonUrl"]
             if state == "failed":
                 raise RuntimeError(f"cloud OCR job failed: {data.get('errorMsg')}")
+            if time.monotonic() - start > self.max_poll_seconds:
+                raise RuntimeError(
+                    f"cloud OCR job timed out after {self.max_poll_seconds}s "
+                    f"(last state: {state})")
             time.sleep(self.poll_interval)
 
     def _fetch_markdown(self, jsonl_url: str) -> tuple[str, dict[str, bytes], int]:
-        resp = requests.get(jsonl_url)
+        resp = requests.get(jsonl_url, timeout=self.request_timeout)
         resp.raise_for_status()
         parts: list[str] = []
         assets: dict[str, bytes] = {}
@@ -67,7 +77,7 @@ class CloudOCR:
                 pages += 1
                 parts.append(res["markdown"]["text"])
                 for img_rel, img_url in res["markdown"].get("images", {}).items():
-                    img = requests.get(img_url)
+                    img = requests.get(img_url, timeout=self.request_timeout)
                     if img.status_code == 200:
                         assets[img_rel] = img.content
         return "\n\n".join(parts), assets, pages

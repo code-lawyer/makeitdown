@@ -1,4 +1,5 @@
 import json
+from collections import Counter
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from pathlib import Path
@@ -20,6 +21,16 @@ def _is_up_to_date(src: Path, md: Path) -> bool:
     return md.exists() and md.stat().st_mtime >= src.stat().st_mtime
 
 
+def _is_safe_asset_rel(rel: str) -> bool:
+    """Reject asset paths that would escape the output directory.
+
+    Asset keys come from the OCR engine (cloud API / paddle); an absolute path
+    or one containing '..' could write outside the per-document folder.
+    """
+    p = Path(rel)
+    return not p.is_absolute() and ".." not in p.parts
+
+
 def _write_output(out_md: Path, result, source_rel: str, source_type: str,
                   warnings: list[str] | None = None):
     out_md.parent.mkdir(parents=True, exist_ok=True)
@@ -33,6 +44,8 @@ def _write_output(out_md: Path, result, source_rel: str, source_type: str,
     )
     out_md.write_text(prepend_frontmatter(result.text, fm), encoding="utf-8")
     for rel, data in result.assets.items():
+        if not _is_safe_asset_rel(rel):
+            continue  # skip path-escaping assets rather than write outside output
         asset_path = out_md.parent / rel
         asset_path.parent.mkdir(parents=True, exist_ok=True)
         asset_path.write_bytes(data)
@@ -69,6 +82,21 @@ def convert_tree(
         "skipped": [],
     }
 
+    files = _iter_files(input_dir)
+    # Two sources with the same stem but different extensions (e.g. report.pdf
+    # and report.docx) would both map to report.md and overwrite each other.
+    # Detect those collisions up front and disambiguate by keeping the original
+    # extension (report.pdf.md); unique stems keep the clean name.
+    md_counts = Counter(
+        f.relative_to(input_dir).with_suffix(".md").as_posix() for f in files
+    )
+
+    def _out_md_for(rel: Path) -> Path:
+        base = rel.with_suffix(".md")
+        if md_counts[base.as_posix()] > 1:
+            return output_dir / rel.parent / (rel.name + ".md")
+        return output_dir / base
+
     def _quality_reasons(result, source_type: str) -> list[str]:
         # A buggy quality checker must never lose a successful conversion.
         if not quality_check:
@@ -81,7 +109,7 @@ def convert_tree(
 
     def handle(src: Path):
         rel = src.relative_to(input_dir)
-        out_md = output_dir / rel.with_suffix(".md")
+        out_md = _out_md_for(rel)
         # Cheap stat check first so re-runs don't open (and decode) files just to skip them.
         if skip_existing and _is_up_to_date(src, out_md):
             return ("skipped_existing", rel, None)
@@ -108,7 +136,6 @@ def convert_tree(
         except Exception as e:  # never abort the batch
             return ("failed", rel, f"{type(e).__name__}: {e}")
 
-    files = _iter_files(input_dir)
     with ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
         for future in as_completed(pool.submit(handle, src) for src in files):
             status, rel, detail = future.result()

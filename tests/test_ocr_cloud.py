@@ -55,6 +55,49 @@ def test_cloud_convert_happy_path(tmp_path, monkeypatch):
     assert result.pages == 1
 
 
+def test_cloud_requests_pass_timeout(tmp_path, monkeypatch):
+    f = tmp_path / "scan.pdf"
+    f.write_bytes(b"%PDF-1.4")
+    timeouts = []
+    jsonl = json.dumps({"result": {"layoutParsingResults": [
+        {"markdown": {"text": "# ok", "images": {}}}]}})
+
+    def fake_post(url, **kw):
+        timeouts.append(kw.get("timeout"))
+        return _Resp(payload={"data": {"jobId": "j"}})
+
+    def fake_get(url, **kw):
+        timeouts.append(kw.get("timeout"))
+        if url.endswith("result.jsonl"):
+            return _Resp(text=jsonl)
+        return _Resp(payload={"data": {"state": "done",
+                                       "resultUrl": {"jsonUrl": "https://x/result.jsonl"}}})
+
+    monkeypatch.setattr(oc.requests, "post", fake_post)
+    monkeypatch.setattr(oc.requests, "get", fake_get)
+    oc.CloudOCR(token="T", poll_interval=0).convert(f)
+    assert timeouts and all(t is not None for t in timeouts)
+
+
+def test_cloud_poll_times_out(tmp_path, monkeypatch):
+    f = tmp_path / "scan.pdf"
+    f.write_bytes(b"%PDF-1.4")
+    monkeypatch.setattr(oc.requests, "post",
+                        lambda url, **kw: _Resp(payload={"data": {"jobId": "j"}}))
+    monkeypatch.setattr(oc.requests, "get",
+                        lambda url, **kw: _Resp(payload={"data": {"state": "running"}}))
+    clock = iter([0.0, 10.0, 20.0, 30.0])
+    monkeypatch.setattr(oc.time, "monotonic", lambda: next(clock))
+    monkeypatch.setattr(oc.time, "sleep", lambda s: None)
+
+    client = oc.CloudOCR(token="T", poll_interval=0, max_poll_seconds=15)
+    try:
+        client.convert(f)
+        assert False, "expected timeout RuntimeError"
+    except RuntimeError as e:
+        assert "timed out" in str(e).lower()
+
+
 def test_cloud_convert_raises_on_poll_http_error(tmp_path, monkeypatch):
     f = tmp_path / "scan.pdf"
     f.write_bytes(b"%PDF-1.4")

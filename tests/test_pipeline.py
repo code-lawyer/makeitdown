@@ -190,6 +190,64 @@ def test_legacy_unavailable_is_skipped_with_hint(tmp_path, monkeypatch):
     assert "LibreOffice" in report["skipped"][0]["reason"]
 
 
+def test_same_stem_different_ext_do_not_collide(tmp_path, monkeypatch):
+    src = tmp_path / "in"
+    src.mkdir()
+    (src / "report.docx").write_text("x", encoding="utf-8")
+    (src / "report.txt").write_text("x", encoding="utf-8")
+    out = tmp_path / "out"
+    monkeypatch.setattr(pl, "classify", lambda p, text_threshold=50: "native")
+    monkeypatch.setattr(pl, "convert_native",
+                        lambda p: ConversionResult(text=f"内容来自 {p.name} " * 5,
+                                                   engine="markitdown"))
+
+    report = pl.convert_tree(src, out, ocr_engine="auto", ocr_model="PP-StructureV3",
+                             cloud_token=None, workers=2, skip_existing=False,
+                             text_threshold=50, report_path=out / "report.json")
+    assert report["succeeded"] == 2
+    # Colliding stems are disambiguated by keeping the original extension.
+    assert (out / "report.docx.md").exists()
+    assert (out / "report.txt.md").exists()
+    assert "report.docx" in (out / "report.docx.md").read_text(encoding="utf-8")
+    assert "report.txt" in (out / "report.txt.md").read_text(encoding="utf-8")
+
+
+def test_unique_stem_keeps_clean_name(tmp_path, monkeypatch):
+    src = tmp_path / "in"
+    src.mkdir()
+    (src / "report.docx").write_text("x", encoding="utf-8")
+    out = tmp_path / "out"
+    monkeypatch.setattr(pl, "classify", lambda p, text_threshold=50: "native")
+    monkeypatch.setattr(pl, "convert_native",
+                        lambda p: ConversionResult(text="正常的文档内容" * 5, engine="markitdown"))
+
+    pl.convert_tree(src, out, ocr_engine="auto", ocr_model="PP-StructureV3",
+                    cloud_token=None, workers=1, skip_existing=False,
+                    text_threshold=50, report_path=out / "report.json")
+    assert (out / "report.md").exists()
+    assert not (out / "report.docx.md").exists()
+
+
+def test_unsafe_asset_paths_are_skipped(tmp_path, monkeypatch):
+    src = tmp_path / "in"
+    src.mkdir()
+    (src / "a.docx").write_text("x", encoding="utf-8")
+    out = tmp_path / "out"
+    monkeypatch.setattr(pl, "classify", lambda p, text_threshold=50: "native")
+    monkeypatch.setattr(pl, "convert_native",
+                        lambda p: ConversionResult(
+                            text="正常的文档内容" * 5, engine="markitdown",
+                            assets={"../evil.png": b"e", "sub/ok.png": b"o",
+                                    "a/../../evil2.png": b"e2"}))
+
+    pl.convert_tree(src, out, ocr_engine="auto", ocr_model="PP-StructureV3",
+                    cloud_token=None, workers=1, skip_existing=False,
+                    text_threshold=50, report_path=out / "report.json")
+    assert (out / "sub" / "ok.png").read_bytes() == b"o"          # safe asset written
+    assert not (tmp_path / "evil.png").exists()                   # ../ escape blocked
+    assert not (tmp_path / "evil2.png").exists()                  # a/../../ escape blocked
+
+
 def test_skip_existing_skips_up_to_date_output(tmp_path, monkeypatch):
     src = tmp_path / "in"
     src.mkdir()
