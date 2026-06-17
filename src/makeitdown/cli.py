@@ -30,6 +30,8 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--report", default=None, help="path to report.json")
     p.add_argument("--no-quality-check", dest="quality_check", action="store_false",
                    help="disable output quality checks (treat all output as clean)")
+    p.add_argument("--keep-images", action="store_true",
+                   help="keep images extracted from scans (default: text-only output)")
     # Defaults sourced from QualityThresholds so there is one source of truth.
     qt = QualityThresholds()
     p.add_argument("--warn-min-chars", type=int, default=qt.min_chars,
@@ -68,6 +70,7 @@ def main(argv: list[str] | None = None) -> int:
         report_path=report_path,
         quality_check=args.quality_check,
         quality_thresholds=thresholds,
+        keep_images=args.keep_images,
     )
 
     print(

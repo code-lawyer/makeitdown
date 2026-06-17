@@ -1,4 +1,5 @@
 import json
+import re
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
@@ -19,6 +20,25 @@ def _iter_files(input_dir: Path) -> list[Path]:
 
 def _is_up_to_date(src: Path, md: Path) -> bool:
     return md.exists() and md.stat().st_mtime >= src.stat().st_mtime
+
+
+_IMG_HTML_RE = re.compile(r"<img\b[^>]*?>", re.IGNORECASE)
+_IMG_MD_RE = re.compile(r"!\[[^\]]*\]\([^)]*\)")
+_EMPTY_DIV_RE = re.compile(r"<div\b[^>]*>\s*</div>", re.IGNORECASE)
+
+
+def _strip_images(text: str) -> str:
+    """Remove image references (HTML <img> and markdown ![]()) and collapse any
+    wrapper <div> left empty as a result. Text-only output for LLM ingestion;
+    table-wrapping divs keep their content and are preserved.
+    """
+    text = _IMG_HTML_RE.sub("", text)
+    text = _IMG_MD_RE.sub("", text)
+    prev = None
+    while prev != text:
+        prev = text
+        text = _EMPTY_DIV_RE.sub("", text)
+    return text
 
 
 def _is_safe_asset_rel(rel: str) -> bool:
@@ -64,6 +84,7 @@ def convert_tree(
     report_path: Path,
     quality_check: bool = True,
     quality_thresholds: QualityThresholds | None = None,
+    keep_images: bool = False,
 ) -> dict:
     input_dir = Path(input_dir)
     output_dir = Path(output_dir)
@@ -124,6 +145,9 @@ def convert_tree(
                 result = convert_legacy(src)
             else:
                 result = dispatcher.convert(src)
+            if not keep_images:
+                result.text = _strip_images(result.text)
+                result.assets = {}
             reasons = _quality_reasons(result, source_type)
             _write_output(out_md, result, rel.as_posix(), source_type,
                           warnings=reasons)

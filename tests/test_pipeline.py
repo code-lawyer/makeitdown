@@ -242,10 +242,61 @@ def test_unsafe_asset_paths_are_skipped(tmp_path, monkeypatch):
 
     pl.convert_tree(src, out, ocr_engine="auto", ocr_model="PP-StructureV3",
                     cloud_token=None, workers=1, skip_existing=False,
-                    text_threshold=50, report_path=out / "report.json")
+                    text_threshold=50, report_path=out / "report.json", keep_images=True)
     assert (out / "sub" / "ok.png").read_bytes() == b"o"          # safe asset written
     assert not (tmp_path / "evil.png").exists()                   # ../ escape blocked
     assert not (tmp_path / "evil2.png").exists()                  # a/../../ escape blocked
+
+
+def test_strip_images_helper():
+    from makeitdown.pipeline import _strip_images
+    t = ('正文 <img src="imgs/seal.jpg" alt="Image"> 中间 ![cap](pic.png) 末尾 '
+         '<div style="text-align: center;"><img src="z.png"></div> '
+         '<div style="text-align: center;"><table>keep</table></div>')
+    out = _strip_images(t)
+    assert "<img" not in out
+    assert "![" not in out
+    assert "imgs/seal.jpg" not in out
+    assert "<table>keep</table>" in out          # table preserved
+    assert "text-align: center;\"></div>" not in out  # emptied seal div collapsed
+
+
+def test_images_stripped_by_default(tmp_path, monkeypatch):
+    src = tmp_path / "in"
+    src.mkdir()
+    (src / "a.docx").write_text("x", encoding="utf-8")
+    out = tmp_path / "out"
+    monkeypatch.setattr(pl, "classify", lambda p, text_threshold=50: "native")
+    text = "正文内容很长很长很长" * 5 + '\n\n<div style="text-align: center;"><img src="imgs/seal.jpg"></div>'
+    monkeypatch.setattr(pl, "convert_native",
+                        lambda p: ConversionResult(text=text, engine="markitdown",
+                                                   assets={"imgs/seal.jpg": b"JPG"}))
+
+    pl.convert_tree(src, out, ocr_engine="auto", ocr_model="PP-StructureV3",
+                    cloud_token=None, workers=1, skip_existing=False,
+                    text_threshold=50, report_path=out / "report.json")
+    md = (out / "a.md").read_text(encoding="utf-8")
+    assert "<img" not in md and "imgs/seal.jpg" not in md
+    assert not (out / "imgs" / "seal.jpg").exists()
+
+
+def test_keep_images_preserves_assets(tmp_path, monkeypatch):
+    src = tmp_path / "in"
+    src.mkdir()
+    (src / "a.docx").write_text("x", encoding="utf-8")
+    out = tmp_path / "out"
+    monkeypatch.setattr(pl, "classify", lambda p, text_threshold=50: "native")
+    text = "正文内容很长很长很长" * 5 + '\n\n<div style="text-align: center;"><img src="imgs/seal.jpg"></div>'
+    monkeypatch.setattr(pl, "convert_native",
+                        lambda p: ConversionResult(text=text, engine="markitdown",
+                                                   assets={"imgs/seal.jpg": b"JPG"}))
+
+    pl.convert_tree(src, out, ocr_engine="auto", ocr_model="PP-StructureV3",
+                    cloud_token=None, workers=1, skip_existing=False,
+                    text_threshold=50, report_path=out / "report.json", keep_images=True)
+    md = (out / "a.md").read_text(encoding="utf-8")
+    assert "<img" in md
+    assert (out / "imgs" / "seal.jpg").read_bytes() == b"JPG"
 
 
 def test_skip_existing_skips_up_to_date_output(tmp_path, monkeypatch):
