@@ -110,6 +110,40 @@ makeitdown docs --ocr-engine cloud
 
 `report.json` 中 `succeeded` 与 `warned` 互斥：前者是产出且干净，后者是产出但可疑。
 
+### LLM 标题层级重建（可选，默认关）
+
+扫描件经 OCR 出来的是**扁平文本**，几乎没有 `#` 标题层级，下游知识库只能平铺。开启
+`--structure-headings` 后，会用一个 LLM **只为 OCR 产物**重建标题层级（native/Word 等
+本就带层级，不处理）。
+
+**安全第一**：LLM **只返回"行号 → 标题级别"的数字**，绝不经手正文——加 `#` 由本地完成，
+正文逐字节原样保留。因此该功能**在原理上不可能改动正文内容**（金额/日期/当事人零风险）。
+非层级材料（聊天记录、清单、表单）会被判为"无标题"并保持扁平；标题占比异常高时整份回退
+扁平并标记。任何失败都回退原文、绝不丢转换结果。
+
+需联网 + 一个 OpenAI 兼容端点（指向 DeepSeek / 通义 / Moonshot / 智谱等国内服务即可）：
+
+```bash
+# PowerShell；key 绝不硬编码，从环境变量读
+$env:MAKEITDOWN_LLM_BASE_URL = "https://api.deepseek.com/v1"
+$env:MAKEITDOWN_LLM_MODEL    = "deepseek-chat"
+$env:MAKEITDOWN_LLM_API_KEY  = "你的key"
+makeitdown docs --ocr-engine local --structure-headings
+```
+
+| 选项 | 说明 | 默认 |
+|---|---|---|
+| `--structure-headings` | 开启 OCR 产物的标题层级重建 | 关 |
+| `--llm-base-url URL` | OpenAI 兼容端点 | 环境变量 `MAKEITDOWN_LLM_BASE_URL` |
+| `--llm-model NAME` | 模型名 | 环境变量 `MAKEITDOWN_LLM_MODEL` |
+| `--llm-api-key KEY` | API key | 环境变量 `MAKEITDOWN_LLM_API_KEY` |
+| `--llm-max-heading-len N` | 候选标题行最大长度 | 80 |
+| `--llm-max-lines N` | 候选行超过则跳过结构化 | 1500 |
+| `--llm-max-heading-ratio F` | 标题占比超过则判无层级、回退扁平 | 0.35 |
+
+成功结构化的文件 `engine` 会追加后缀（如 `local:pp-structurev3+llm-heads:deepseek-chat`），
+数量计入 `report.json` 的 `structured`。
+
 ### 老式 .doc / .wps
 
 `.doc`（老 Word 二进制）和 `.wps`（金山）markitdown 读不了，makeitdown 会分层处理：

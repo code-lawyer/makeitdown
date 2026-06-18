@@ -5,6 +5,7 @@ from pathlib import Path
 
 from .pipeline import convert_tree
 from .quality import QualityThresholds
+from .structure import HeadingStructurer
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -42,6 +43,22 @@ def _build_parser() -> argparse.ArgumentParser:
                    help="warn if garbled-character ratio exceeds this (0-1)")
     p.add_argument("--warn-repeat-count", type=int, default=qt.repeat_count,
                    help="warn if a line repeats more than this many times")
+    # LLM heading-structure reconstruction (opt-in; OCR output only).
+    p.add_argument("--structure-headings", action="store_true",
+                   help="rebuild heading levels of OCR output via an LLM "
+                        "(needs --llm-base-url/--llm-model/--llm-api-key)")
+    p.add_argument("--llm-base-url", default=None,
+                   help="OpenAI-compatible endpoint (default: env MAKEITDOWN_LLM_BASE_URL)")
+    p.add_argument("--llm-model", default=None,
+                   help="LLM model name (default: env MAKEITDOWN_LLM_MODEL)")
+    p.add_argument("--llm-api-key", default=None,
+                   help="LLM API key (default: env MAKEITDOWN_LLM_API_KEY)")
+    p.add_argument("--llm-max-heading-len", type=int, default=80,
+                   help="max length of a candidate heading line")
+    p.add_argument("--llm-max-lines", type=int, default=1500,
+                   help="skip structuring if candidate lines exceed this")
+    p.add_argument("--llm-max-heading-ratio", type=float, default=0.35,
+                   help="if headings exceed this fraction, treat doc as unstructured")
     return p
 
 
@@ -59,6 +76,26 @@ def main(argv: list[str] | None = None) -> int:
         repeat_count=args.warn_repeat_count,
     )
 
+    structurer = None
+    if args.structure_headings:
+        base_url = args.llm_base_url or os.environ.get("MAKEITDOWN_LLM_BASE_URL")
+        model = args.llm_model or os.environ.get("MAKEITDOWN_LLM_MODEL")
+        api_key = args.llm_api_key or os.environ.get("MAKEITDOWN_LLM_API_KEY")
+        if not (base_url and model and api_key):
+            print(
+                "error: --structure-headings requires --llm-base-url / --llm-model / "
+                "--llm-api-key (or env MAKEITDOWN_LLM_BASE_URL / MAKEITDOWN_LLM_MODEL / "
+                "MAKEITDOWN_LLM_API_KEY)",
+                file=sys.stderr,
+            )
+            return 2
+        structurer = HeadingStructurer(
+            base_url, api_key, model,
+            max_heading_len=args.llm_max_heading_len,
+            max_input_lines=args.llm_max_lines,
+            max_heading_ratio=args.llm_max_heading_ratio,
+        )
+
     report = convert_tree(
         input_dir, output_dir,
         ocr_engine=args.ocr_engine,
@@ -71,11 +108,15 @@ def main(argv: list[str] | None = None) -> int:
         quality_check=args.quality_check,
         quality_thresholds=thresholds,
         keep_images=args.keep_images,
+        structurer=structurer,
     )
 
+    structured = (f"structured={report.get('structured', 0)} "
+                  if args.structure_headings else "")
     print(
         f"Done. succeeded={report['succeeded']} warned={report['warned']} "
-        f"failed={report['failed']} skipped_existing={report['skipped_existing']} "
+        f"{structured}failed={report['failed']} "
+        f"skipped_existing={report['skipped_existing']} "
         f"skipped_unsupported={report['skipped_unsupported']}"
     )
     if report["warned"]:

@@ -78,6 +78,72 @@ def test_cli_summary_includes_warned(monkeypatch, capsys):
     assert "warned=2" in out
 
 
+def test_cli_structure_headings_builds_structurer(monkeypatch):
+    captured = {}
+    monkeypatch.setattr(cli, "convert_tree",
+                        lambda input_dir, output_dir, **kw: captured.update(kw) or _report())
+    monkeypatch.delenv("PADDLEOCR_AISTUDIO_TOKEN", raising=False)
+
+    rc = cli.main(["in", "--structure-headings", "--llm-base-url", "http://x/v1",
+                   "--llm-model", "deepseek-chat", "--llm-api-key", "K"])
+    assert rc == 0
+    s = captured["structurer"]
+    assert s is not None
+    assert s.model == "deepseek-chat"
+    assert s.base_url == "http://x/v1"
+
+
+def test_cli_structure_headings_reads_llm_config_from_env(monkeypatch):
+    captured = {}
+    monkeypatch.setattr(cli, "convert_tree",
+                        lambda input_dir, output_dir, **kw: captured.update(kw) or _report())
+    monkeypatch.delenv("PADDLEOCR_AISTUDIO_TOKEN", raising=False)
+    monkeypatch.setenv("MAKEITDOWN_LLM_BASE_URL", "http://env/v1")
+    monkeypatch.setenv("MAKEITDOWN_LLM_MODEL", "qwen")
+    monkeypatch.setenv("MAKEITDOWN_LLM_API_KEY", "ENVK")
+
+    cli.main(["in", "--structure-headings"])
+    assert captured["structurer"].model == "qwen"
+
+
+def test_cli_structure_headings_fail_fast_without_config(monkeypatch, capsys):
+    called = {"n": 0}
+
+    def spy(input_dir, output_dir, **kw):
+        called["n"] += 1
+        return _report()
+
+    monkeypatch.setattr(cli, "convert_tree", spy)
+    monkeypatch.delenv("PADDLEOCR_AISTUDIO_TOKEN", raising=False)
+    for var in ("MAKEITDOWN_LLM_BASE_URL", "MAKEITDOWN_LLM_MODEL", "MAKEITDOWN_LLM_API_KEY"):
+        monkeypatch.delenv(var, raising=False)
+
+    rc = cli.main(["in", "--structure-headings"])
+    assert rc != 0
+    assert called["n"] == 0
+    assert "structure-headings" in capsys.readouterr().err
+
+
+def test_cli_default_passes_no_structurer(monkeypatch):
+    captured = {}
+    monkeypatch.setattr(cli, "convert_tree",
+                        lambda input_dir, output_dir, **kw: captured.update(kw) or _report())
+    monkeypatch.delenv("PADDLEOCR_AISTUDIO_TOKEN", raising=False)
+    cli.main(["in"])
+    assert captured["structurer"] is None
+
+
+def test_cli_summary_includes_structured_when_enabled(monkeypatch, capsys):
+    monkeypatch.setattr(cli, "convert_tree",
+                        lambda input_dir, output_dir, **kw: _report(succeeded=4, structured=4))
+    monkeypatch.delenv("PADDLEOCR_AISTUDIO_TOKEN", raising=False)
+    monkeypatch.setenv("MAKEITDOWN_LLM_BASE_URL", "http://env/v1")
+    monkeypatch.setenv("MAKEITDOWN_LLM_MODEL", "qwen")
+    monkeypatch.setenv("MAKEITDOWN_LLM_API_KEY", "ENVK")
+    cli.main(["in", "--structure-headings"])
+    assert "structured=4" in capsys.readouterr().out
+
+
 def test_cli_notes_actionable_skips(monkeypatch, capsys):
     skipped = [{"file": "a.doc", "reason": "needs WPS/Office or LibreOffice"}]
     monkeypatch.setattr(cli, "convert_tree",

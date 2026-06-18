@@ -85,6 +85,7 @@ def convert_tree(
     quality_check: bool = True,
     quality_thresholds: QualityThresholds | None = None,
     keep_images: bool = False,
+    structurer=None,
 ) -> dict:
     input_dir = Path(input_dir)
     output_dir = Path(output_dir)
@@ -95,6 +96,7 @@ def convert_tree(
     report = {
         "succeeded": 0,
         "warned": 0,
+        "structured": 0,
         "failed": 0,
         "skipped_existing": 0,
         "skipped_unsupported": 0,
@@ -133,37 +135,54 @@ def convert_tree(
         out_md = _out_md_for(rel)
         # Cheap stat check first so re-runs don't open (and decode) files just to skip them.
         if skip_existing and _is_up_to_date(src, out_md):
-            return ("skipped_existing", rel, None)
+            return ("skipped_existing", rel, None, False)
         route = classify(src, text_threshold=text_threshold)
         if route == "unsupported":
-            return ("skipped_unsupported", rel, None)
+            return ("skipped_unsupported", rel, None, False)
         try:
             source_type = src.suffix.lstrip(".")
+            struct_reasons: list[str] = []
+            structured_ok = False
             if route == "native":
                 result = convert_native(src)
             elif route == "legacy":
                 result = convert_legacy(src)
             else:
                 result = dispatcher.convert(src)
+                # OCR output is flat; optionally rebuild heading levels via LLM.
+                # A structurer bug must never lose a successful conversion.
+                if structurer is not None:
+                    try:
+                        new_text, suffix, warn = structurer.restructure(result.text)
+                        result.text = new_text
+                        if suffix:
+                            result.engine = f"{result.engine}+{suffix}"
+                            structured_ok = True
+                        if warn:
+                            struct_reasons.append(warn)
+                    except Exception:
+                        pass
             if not keep_images:
                 result.text = _strip_images(result.text)
                 result.assets = {}
-            reasons = _quality_reasons(result, source_type)
+            reasons = struct_reasons + _quality_reasons(result, source_type)
             _write_output(out_md, result, rel.as_posix(), source_type,
                           warnings=reasons)
             if reasons:
-                return ("warned", rel, reasons)
-            return ("succeeded", rel, None)
+                return ("warned", rel, reasons, structured_ok)
+            return ("succeeded", rel, None, structured_ok)
         except LegacyConversionUnavailable as e:
             # Recognized but no converter available: skip knowingly with a hint.
-            return ("skipped_unsupported", rel, str(e))
+            return ("skipped_unsupported", rel, str(e), False)
         except Exception as e:  # never abort the batch
-            return ("failed", rel, f"{type(e).__name__}: {e}")
+            return ("failed", rel, f"{type(e).__name__}: {e}", False)
 
     with ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
         for future in as_completed(pool.submit(handle, src) for src in files):
-            status, rel, detail = future.result()
+            status, rel, detail, structured = future.result()
             report[status] += 1
+            if structured:
+                report["structured"] += 1
             if status == "failed":
                 report["failures"].append({"file": rel.as_posix(), "error": detail})
             elif status == "warned":

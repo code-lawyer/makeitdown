@@ -299,6 +299,91 @@ def test_keep_images_preserves_assets(tmp_path, monkeypatch):
     assert (out / "imgs" / "seal.jpg").read_bytes() == b"JPG"
 
 
+class _ApplyStruct:
+    """Fake structurer that pretends to add a heading and label the engine."""
+
+    def restructure(self, text):
+        return ("# 标题\n" + text, "llm-heads:deepseek-chat", None)
+
+
+class _SpyStruct:
+    def __init__(self):
+        self.calls = 0
+
+    def restructure(self, text):
+        self.calls += 1
+        return text, None, None
+
+
+class _WarnStruct:
+    def restructure(self, text):
+        return text, None, "heading structuring skipped: Timeout"
+
+
+def _ocr_tree(tmp_path, monkeypatch):
+    src = tmp_path / "in"
+    src.mkdir()
+    (src / "b.png").write_bytes(b"\x00")
+    monkeypatch.setattr(pl, "classify", lambda p, text_threshold=50: "ocr")
+
+    class _Disp:
+        def __init__(self, **k):
+            pass
+
+        def convert(self, p):
+            return ConversionResult(text="标题\n" + "正常的文档内容" * 5,
+                                    engine="local:pp-structurev3")
+
+    monkeypatch.setattr(pl, "OCRDispatcher", _Disp)
+    return src
+
+
+def test_structurer_applied_on_ocr_route(tmp_path, monkeypatch):
+    src = _ocr_tree(tmp_path, monkeypatch)
+    out = tmp_path / "out"
+    report = pl.convert_tree(src, out, ocr_engine="auto", ocr_model="PP-StructureV3",
+                             cloud_token=None, workers=1, skip_existing=False,
+                             text_threshold=50, report_path=out / "report.json",
+                             structurer=_ApplyStruct())
+    md = (out / "b.md").read_text(encoding="utf-8")
+    assert "engine: local:pp-structurev3+llm-heads:deepseek-chat" in md
+    assert "# 标题" in md
+    assert report["structured"] == 1
+    assert report["succeeded"] == 1
+
+
+def test_structurer_not_called_on_native_route(tmp_path, monkeypatch):
+    src = _single_docx(tmp_path)
+    out = tmp_path / "out"
+    monkeypatch.setattr(pl, "classify", lambda p, text_threshold=50: "native")
+    monkeypatch.setattr(pl, "convert_native",
+                        lambda p: ConversionResult(text="正常的文档内容" * 5,
+                                                   engine="markitdown"))
+    spy = _SpyStruct()
+    report = pl.convert_tree(src, out, ocr_engine="auto", ocr_model="PP-StructureV3",
+                             cloud_token=None, workers=1, skip_existing=False,
+                             text_threshold=50, report_path=out / "report.json",
+                             structurer=spy)
+    assert spy.calls == 0
+    assert report["structured"] == 0
+    assert report["succeeded"] == 1
+
+
+def test_structurer_warning_marks_warned_but_keeps_output(tmp_path, monkeypatch):
+    src = _ocr_tree(tmp_path, monkeypatch)
+    out = tmp_path / "out"
+    report = pl.convert_tree(src, out, ocr_engine="auto", ocr_model="PP-StructureV3",
+                             cloud_token=None, workers=1, skip_existing=False,
+                             text_threshold=50, report_path=out / "report.json",
+                             structurer=_WarnStruct())
+    assert report["warned"] == 1
+    assert (out / "b.md").exists()
+    md = (out / "b.md").read_text(encoding="utf-8")
+    assert "quality: suspect" in md
+    assert any("heading structuring skipped" in r
+               for r in report["warnings"][0]["reasons"])
+
+
 def test_skip_existing_skips_up_to_date_output(tmp_path, monkeypatch):
     src = tmp_path / "in"
     src.mkdir()
