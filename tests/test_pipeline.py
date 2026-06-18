@@ -384,6 +384,32 @@ def test_structurer_warning_marks_warned_but_keeps_output(tmp_path, monkeypatch)
                for r in report["warnings"][0]["reasons"])
 
 
+def test_low_confidence_ocr_flagged_as_warned(tmp_path, monkeypatch):
+    src = tmp_path / "in"
+    src.mkdir()
+    (src / "b.png").write_bytes(b"\x00")
+    out = tmp_path / "out"
+    monkeypatch.setattr(pl, "classify", lambda p, text_threshold=50: "ocr")
+
+    class _Disp:
+        def __init__(self, **k):
+            pass
+
+        def convert(self, p):
+            return ConversionResult(text="正常的文档内容" * 5,
+                                    engine="local:pp-structurev3",
+                                    confidences=[0.99, 0.30, 0.95])
+
+    monkeypatch.setattr(pl, "OCRDispatcher", _Disp)
+    report = pl.convert_tree(src, out, ocr_engine="auto", ocr_model="PP-StructureV3",
+                             cloud_token=None, workers=1, skip_existing=False,
+                             text_threshold=50, report_path=out / "report.json")
+    assert report["warned"] == 1
+    md = (out / "b.md").read_text(encoding="utf-8")
+    assert "quality: suspect" in md
+    assert any("low-confidence" in r for r in report["warnings"][0]["reasons"])
+
+
 def test_skip_existing_skips_up_to_date_output(tmp_path, monkeypatch):
     src = tmp_path / "in"
     src.mkdir()

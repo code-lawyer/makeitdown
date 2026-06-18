@@ -15,6 +15,7 @@ class QualityThresholds:
     min_chars_per_page: int = 50
     garbled_ratio: float = 0.02
     repeat_count: int = 30
+    min_confidence: float = 0.6
 
 
 # Punctuation treated as legitimate content, so it never counts as "garbled".
@@ -41,6 +42,7 @@ def assess(
     source_type: str,
     pages: int | None = None,
     thresholds: QualityThresholds | None = None,
+    confidences: list[float] | None = None,
 ) -> list[str]:
     """Return human-readable warning reasons for suspect output; [] if clean.
 
@@ -82,5 +84,16 @@ def assess(
         _, n = max(counts.items(), key=lambda kv: kv[1])
         if n > thresholds.repeat_count:
             reasons.append(f"line repeated {n}x (possible OCR loop)")
+
+    # low OCR recognition confidence — the natural signal for locally corrupted
+    # text (e.g. a damaged digit in an amount). Only checked when the backend
+    # supplied per-region scores; absent scores leave this rule inactive.
+    if confidences:
+        worst = min(confidences)
+        low = sum(1 for c in confidences if c < thresholds.min_confidence)
+        if low:
+            reasons.append(
+                f"{low} low-confidence OCR region(s), min {worst:.2f}"
+            )
 
     return reasons

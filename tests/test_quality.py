@@ -1,6 +1,41 @@
 from makeitdown.quality import assess, QualityThresholds
 
 
+# --- OCR confidence (Phase 2): low recognition scores flag suspect output ---
+
+_GOOD = "正常的中文合同内容" * 5  # passes the other rules so we isolate confidence
+
+
+def test_low_confidence_region_flagged():
+    reasons = assess(_GOOD, source_type="png", pages=1,
+                     confidences=[0.99, 0.42, 0.95])
+    assert any("low-confidence" in r and "0.42" in r for r in reasons)
+
+
+def test_all_high_confidence_not_flagged():
+    reasons = assess(_GOOD, source_type="png", pages=1,
+                     confidences=[0.99, 0.97, 0.93])
+    assert not any("confidence" in r for r in reasons)
+
+
+def test_confidence_none_skips_rule():
+    assert assess(_GOOD, source_type="png", pages=1, confidences=None) == []
+
+
+def test_confidence_empty_skips_rule():
+    assert assess(_GOOD, source_type="png", pages=1, confidences=[]) == []
+
+
+def test_confidence_threshold_is_configurable():
+    # 0.55 is below the default 0.6 (flagged) but above a custom 0.5 (not).
+    assert any("confidence" in r
+               for r in assess(_GOOD, source_type="png", pages=1, confidences=[0.55]))
+    t = QualityThresholds(min_confidence=0.5)
+    assert not any("confidence" in r
+                   for r in assess(_GOOD, source_type="png", pages=1,
+                                   confidences=[0.55], thresholds=t))
+
+
 # --- clean inputs should never warn (guard against false positives) ---
 
 def test_clean_chinese_paragraph_no_warnings():

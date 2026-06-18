@@ -96,12 +96,18 @@ makeitdown docs --ocr-engine cloud
 | `--warn-min-chars-per-page N` | 多页文档每页平均字符数低于此值则警告（默认 50） |
 | `--warn-garbled-ratio F` | 乱码字符比例超过此值则警告（默认 0.02） |
 | `--warn-repeat-count N` | 某行重复超过此次数则警告（默认 30） |
+| `--warn-min-confidence F` | OCR 区域识别置信度低于此值则警告（0-1，默认 0.6；仅本地 PP-StructureV3 暴露置信度时生效） |
 
 ### 质检与异常警告
 
-转换**成功但结果可疑**的文件（整页空白、乱码、内容异常重复、多页却几乎没字），不会被
-当作正常结果悄悄写出，而是会被**标记**——既进 `report.json` 的 `warnings`，也写进该 `.md`
-的 frontmatter（`quality: suspect` + `warnings` 列表），警告随文件进入下游知识库。
+转换**成功但结果可疑**的文件（整页空白、乱码、内容异常重复、多页却几乎没字、**OCR 识别
+置信度过低**），不会被当作正常结果悄悄写出，而是会被**标记**——既进 `report.json` 的
+`warnings`，也写进该 `.md` 的 frontmatter（`quality: suspect` + `warnings` 列表），警告随
+文件进入下游知识库。
+
+> 置信度检测专为"OCR 局部数字损坏"这类法律高危盲点设计：本地 PP-StructureV3 会给出每个
+> 识别区域的置信度，低于阈值即标记。云端 PaddleOCR-VL 不提供逐区域置信度，该项对其自动
+> 跳过（不影响其他质检规则）。
 
 - **只警告、不改内容**：质检永不修改或删除你的转换结果，最坏只是误报一个标记。
 - **硬失败**（转换直接报错）仍按原样隔离：不产出 `.md`，记入 `report.json` 的 `failures`，

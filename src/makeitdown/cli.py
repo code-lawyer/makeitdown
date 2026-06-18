@@ -43,6 +43,8 @@ def _build_parser() -> argparse.ArgumentParser:
                    help="warn if garbled-character ratio exceeds this (0-1)")
     p.add_argument("--warn-repeat-count", type=int, default=qt.repeat_count,
                    help="warn if a line repeats more than this many times")
+    p.add_argument("--warn-min-confidence", type=float, default=qt.min_confidence,
+                   help="warn if any OCR region scores below this (0-1, when known)")
     # LLM heading-structure reconstruction (opt-in; OCR output only).
     p.add_argument("--structure-headings", action="store_true",
                    help="rebuild heading levels of OCR output via an LLM "
@@ -74,6 +76,7 @@ def main(argv: list[str] | None = None) -> int:
         min_chars_per_page=args.warn_min_chars_per_page,
         garbled_ratio=args.warn_garbled_ratio,
         repeat_count=args.warn_repeat_count,
+        min_confidence=args.warn_min_confidence,
     )
 
     structurer = None

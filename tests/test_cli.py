@@ -60,13 +60,16 @@ def test_cli_quality_defaults_and_flags_wired(tmp_path, monkeypatch):
     assert captured["quality_thresholds"].min_chars == 20
     assert captured["quality_thresholds"].garbled_ratio == 0.02
 
+    assert captured["quality_thresholds"].min_confidence == 0.6
+
     # overrides
     cli.main(["in", "--no-quality-check", "--warn-min-chars", "5",
               "--warn-min-chars-per-page", "80", "--warn-garbled-ratio", "0.1",
-              "--warn-repeat-count", "100"])
+              "--warn-repeat-count", "100", "--warn-min-confidence", "0.7"])
     assert captured["quality_check"] is False
     t = captured["quality_thresholds"]
     assert (t.min_chars, t.min_chars_per_page, t.garbled_ratio, t.repeat_count) == (5, 80, 0.1, 100)
+    assert t.min_confidence == 0.7
 
 
 def test_cli_summary_includes_warned(monkeypatch, capsys):

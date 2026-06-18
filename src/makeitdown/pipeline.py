@@ -126,7 +126,8 @@ def convert_tree(
             return []
         try:
             return assess(result.text, source_type=source_type,
-                          pages=result.pages, thresholds=quality_thresholds)
+                          pages=result.pages, thresholds=quality_thresholds,
+                          confidences=result.confidences)
         except Exception:
             return []
 

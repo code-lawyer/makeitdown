@@ -81,19 +81,34 @@ class LocalOCR:
                 continue
         return assets
 
+    @staticmethod
+    def _extract_scores(result) -> list[float]:
+        """Per-line OCR recognition scores for a page, when present.
+
+        PP-StructureV3 pages expose ``["overall_ocr_res"]["rec_scores"]``.
+        Best-effort: VL pipelines (and anything without that shape) yield none.
+        """
+        try:
+            return [float(s) for s in result["overall_ocr_res"]["rec_scores"]]
+        except Exception:
+            return []
+
     def convert(self, path: Path) -> ConversionResult:
         with self._lock:
             engine = self._ensure_engine()
             results = list(engine.predict(str(path)))
             parts: list[str] = []
             assets: dict[str, bytes] = {}
+            confidences: list[float] = []
             for r in results:
                 md = r.markdown  # paddlex result: dict with markdown_texts/images
                 parts.append(md["markdown_texts"])
                 assets.update(self._extract_assets(md))
+                confidences.extend(self._extract_scores(r))
         return ConversionResult(
             text="\n\n".join(parts),
             engine=self.engine_label,
             pages=len(results),
             assets=assets,
+            confidences=confidences or None,
         )
