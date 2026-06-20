@@ -12,14 +12,22 @@ Strategy, in order of preference and cost:
                        an actionable message so the file is skipped knowingly.
 """
 
+import atexit
 import platform
 import shutil
 import subprocess
 import tempfile
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from .convert_native import convert as convert_native
 from .models import ConversionResult, LegacyConversionUnavailable
+
+# A single Word/WPS COM operation can take seconds; cap it so one hung document
+# can't block a worker forever.
+_COM_CALL_TIMEOUT = 300.0
+_WD_FORMAT_DOCX = 16  # wdFormatDocumentDefault
 
 _HINT = (
     "legacy .doc/.wps needs Microsoft Word or WPS Office installed (Windows), "
@@ -41,46 +49,129 @@ def _sniff(path: Path) -> str:
     return "unknown"
 
 
-def _convert_via_com(src: Path, out_docx: Path) -> bool:
-    """Use an already-installed Word/WPS via COM to save `src` as a .docx.
+def _default_dispatch():
+    """Attach to an already-installed Word/WPS via COM (Windows only).
 
-    Returns True on success. Windows-only; a no-op everywhere else. Never
-    installs anything — it only drives an application the user already has.
+    Runs on the session's dedicated thread, so CoInitialize happens on the same
+    thread that will drive the app. Returns the app, or None if unavailable.
     """
-    if platform.system() != "Windows":
-        return False
     try:
         import pythoncom  # noqa: PLC0415
         import win32com.client  # noqa: PLC0415
     except Exception:
-        return False
-
-    pythoncom.CoInitialize()  # COM must be initialized per worker thread
+        return None
     try:
-        for prog_id in ("Word.Application", "KWPS.Application", "WPS.Application"):
-            try:
-                app = win32com.client.Dispatch(prog_id)
-            except Exception:
-                continue
-            try:
+        pythoncom.CoInitialize()
+    except Exception:
+        pass
+    for prog_id in ("Word.Application", "KWPS.Application", "WPS.Application"):
+        try:
+            app = win32com.client.Dispatch(prog_id)
+        except Exception:
+            continue
+        try:
+            app.Visible = False
+        except Exception:
+            pass
+        return app
+    return None
+
+
+class _WordSession:
+    """Owns one Word/WPS COM instance on a single dedicated thread.
+
+    All COM work (attach, open, save, quit) runs on that one thread, which keeps
+    the STA object on its creating thread and serializes access — so many worker
+    threads can call ``convert`` without driving COM concurrently (the cause of
+    "RPC server unavailable" crashes) and without cold-starting Word per file.
+    The app is created lazily, reused across the whole batch, and quit once at
+    shutdown. If no app is available it's concluded once, not retried per file.
+    """
+
+    def __init__(self, dispatch_fn=_default_dispatch):
+        self._dispatch = dispatch_fn
+        self._executor = ThreadPoolExecutor(max_workers=1)
+        self._app = None
+        self._resolved = False
+
+    def convert(self, src, out_docx) -> bool:
+        try:
+            return self._executor.submit(self._run, str(src), str(out_docx)).result(
+                timeout=_COM_CALL_TIMEOUT
+            )
+        except Exception:
+            return False
+
+    def _app_or_none(self):
+        if not self._resolved:
+            self._resolved = True
+            self._app = self._dispatch()
+        return self._app
+
+    def _run(self, src: str, out_docx: str) -> bool:
+        app = self._app_or_none()
+        if app is None:
+            return False
+        doc = None
+        try:
+            doc = app.Documents.Open(src)
+            doc.SaveAs2(out_docx, FileFormat=_WD_FORMAT_DOCX)
+            return True
+        except Exception:
+            return False
+        finally:
+            if doc is not None:
                 try:
-                    app.Visible = False
+                    doc.Close(False)
                 except Exception:
                     pass
-                doc = app.Documents.Open(str(src))
-                doc.SaveAs2(str(out_docx), FileFormat=16)  # 16 = wdFormatDocumentDefault (.docx)
-                doc.Close(False)
-                return True
-            except Exception:
-                continue
-            finally:
+
+    def shutdown(self):
+        def _quit():
+            if self._app is not None:
                 try:
-                    app.Quit()
+                    self._app.Quit()
                 except Exception:
                     pass
+                self._app = None
+            try:
+                import pythoncom  # noqa: PLC0415
+
+                pythoncom.CoUninitialize()
+            except Exception:
+                pass
+
+        try:
+            self._executor.submit(_quit).result(timeout=30)
+        except Exception:
+            pass
+        self._executor.shutdown(wait=True)
+
+
+_session = None
+_session_lock = threading.Lock()
+
+
+def _get_session() -> _WordSession:
+    global _session
+    if _session is None:
+        with _session_lock:
+            if _session is None:
+                _session = _WordSession()
+                atexit.register(_session.shutdown)
+    return _session
+
+
+def _convert_via_com(src: Path, out_docx: Path) -> bool:
+    """Use an already-installed Word/WPS via COM to save `src` as a .docx.
+
+    Returns True on success. Windows-only; a no-op everywhere else. Delegates to
+    a shared, serialized, instance-reusing session. Never installs anything — it
+    only drives an application the user already has.
+    """
+    if platform.system() != "Windows":
         return False
-    finally:
-        pythoncom.CoUninitialize()
+    return _get_session().convert(src, out_docx)
 
 
 def _convert_via_libreoffice(src: Path, out_dir: Path) -> Path | None:

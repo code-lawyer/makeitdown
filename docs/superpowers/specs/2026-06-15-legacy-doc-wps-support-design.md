@@ -3,6 +3,13 @@
 日期：2026-06-15
 状态：已确认，待实现
 
+> **2026-06-18 补充（COM 并发与冷启动修复）**：原实现对每个真二进制 `.doc/.wps` 都
+> `Dispatch` 一次 Word/WPS、转完即 `Quit`；在 `--workers>1` 下多个 worker 线程并发驱动同一
+> 个 COM 单例，会触发 "RPC server unavailable" 崩溃，且逐文件冷启动 Word 极慢。现改为
+> `_WordSession`：所有 COM 操作跑在**单个专用线程**上（STA 对象不跨线程、天然串行），**全批
+> 复用一个 Word 实例**（开一次、转 N 个、`atexit` 时 Quit 一次），无可用应用时只判定一次、
+> 不逐文件重试。`_convert_via_com(src, out_docx)` 签名不变（仍是 mock 接缝）。
+
 ## 背景与目标
 
 markitdown 只认 `.docx`，不认老式 `.doc`（OLE2 二进制）和 `.wps`（金山）。

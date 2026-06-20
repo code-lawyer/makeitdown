@@ -96,6 +96,89 @@ def test_convert_passes_absolute_path_to_backend(tmp_path, monkeypatch):
     assert Path(seen["src"]).is_absolute()
 
 
+class _FakeDoc:
+    def SaveAs2(self, path, FileFormat=None):
+        pass
+
+    def Close(self, flag):
+        pass
+
+
+def test_word_session_reuses_one_app_and_quits_once():
+    # The whole batch must share one Word instance (open once, convert N, quit
+    # once) instead of cold-starting/quitting Word per file.
+    state = {"dispatched": 0, "quits": 0}
+
+    class _App:
+        def __init__(self):
+            self.Documents = type("D", (), {"Open": lambda self, p: _FakeDoc()})()
+
+        def Quit(self):
+            state["quits"] += 1
+
+    def dispatch():
+        state["dispatched"] += 1
+        return _App()
+
+    sess = cl._WordSession(dispatch)
+    assert sess.convert("a.doc", "a.docx") is True
+    assert sess.convert("b.doc", "b.docx") is True
+    assert sess.convert("c.doc", "c.docx") is True
+    assert state["dispatched"] == 1  # created once, reused
+    sess.shutdown()
+    assert state["quits"] == 1  # quit once, at shutdown
+
+
+def test_word_session_serializes_concurrent_calls():
+    # COM must never be driven from two threads at once (the RPC-crash cause).
+    import threading
+    import time
+
+    active = {"now": 0, "max": 0}
+    guard = threading.Lock()
+
+    class _Docs:
+        def Open(self, p):
+            with guard:
+                active["now"] += 1
+                active["max"] = max(active["max"], active["now"])
+            time.sleep(0.02)
+            with guard:
+                active["now"] -= 1
+            return _FakeDoc()
+
+    class _App:
+        Documents = _Docs()
+
+        def Quit(self):
+            pass
+
+    sess = cl._WordSession(lambda: _App())
+    threads = [threading.Thread(target=lambda i=i: sess.convert(f"{i}.doc", f"{i}.docx"))
+               for i in range(5)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert active["max"] == 1  # never two COM operations concurrently
+    sess.shutdown()
+
+
+def test_word_session_no_app_returns_false_without_retrying():
+    # If Word/WPS isn't available, conclude once — don't re-attempt per file.
+    state = {"n": 0}
+
+    def dispatch():
+        state["n"] += 1
+        return None
+
+    sess = cl._WordSession(dispatch)
+    assert sess.convert("a.doc", "a.docx") is False
+    assert sess.convert("b.doc", "b.docx") is False
+    assert state["n"] == 1
+    sess.shutdown()
+
+
 def test_com_short_circuits_off_windows(tmp_path, monkeypatch):
     monkeypatch.setattr(cl.platform, "system", lambda: "Linux")
     assert cl._convert_via_com(tmp_path / "x.doc", tmp_path / "x.docx") is False
