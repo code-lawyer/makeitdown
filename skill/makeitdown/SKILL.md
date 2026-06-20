@@ -109,8 +109,94 @@ env `PADDLEOCR_AISTUDIO_TOKEN` (or `--cloud-token`).
 ## Common options
 
 - `--skip-existing` — incremental: skip files whose `.md` is newer than the source.
-- `--workers N` — concurrency.
+- `--workers N` — concurrency (native conversions run in parallel; local OCR is
+  serialized internally for thread-safety, so this mainly speeds up native files).
 - `--text-threshold N` — avg chars/page below which a PDF is treated as scanned.
+- `--keep-images` — keep images extracted from scans (default: text-only output).
+
+## Quality flags (suspect output travels with the file)
+
+Conversions that *succeed but look wrong* (near-empty, garbled, runaway repetition,
+multi-page with almost no text, or **low OCR confidence**) are not silently emitted
+as clean — they are flagged into `report.json` **and** the `.md` frontmatter
+(`quality: suspect` + a `warnings` list). For legal/high-stakes use, surface these
+to the user for manual review.
+
+- `--no-quality-check` — disable all checks (treat every output as clean).
+- `--warn-min-confidence F` — flag if any OCR region scores below this (0-1,
+  default 0.6; **local PP-StructureV3 only** — cloud PaddleOCR-VL exposes no
+  per-region scores, so the rule is simply inactive there).
+- `--warn-min-chars N`, `--warn-min-chars-per-page N`, `--warn-garbled-ratio F`,
+  `--warn-repeat-count N` — other thresholds; defaults are conservative.
+
+Thresholds are not yet calibrated against a real corpus — for a new deployment,
+run a small sample first and tune (see `docs/2026-06-18-field-validation-plan.md`).
+
+## Optional: LLM heading reconstruction for OCR output
+
+Scanned output is flat text with no `#` heading levels. `--structure-headings`
+rebuilds heading levels **for OCR-routed files only**, using an LLM that returns
+*only* a line→level map — body text is copied byte-for-byte and can never be
+altered (safe for amounts/dates). Off by default; needs an OpenAI-compatible
+endpoint (point it at a domestic provider: DeepSeek / Qwen / Moonshot / Zhipu).
+
+```bash
+# prefer env vars; a key on the command line lands in shell history
+export MAKEITDOWN_LLM_BASE_URL="https://api.deepseek.com/v1"
+export MAKEITDOWN_LLM_MODEL="deepseek-chat"
+export MAKEITDOWN_LLM_API_KEY="<key>"
+makeitdown <input_dir> --ocr-engine local --structure-headings
+```
+
+Successfully structured files get an engine suffix (`...+llm-heads:<model>`) and
+count toward `report.json`'s `structured`. Non-hierarchical material (chat logs,
+lists) stays flat; any failure falls back to the original text.
+
+## Reading the results (machine-readable contract)
+
+After a run, parse `<output_dir>/report.json`:
+
+```jsonc
+{
+  "succeeded": 120,   // produced and clean
+  "warned": 8,        // produced but quality: suspect (review these)
+  "structured": 34,   // had LLM heading reconstruction applied
+  "failed": 3,        // hard error, no .md produced
+  "skipped_existing": 0,
+  "skipped_unsupported": 2,
+  "failures": [ { "file": "...", "error": "..." } ],
+  "warnings": [ { "file": "...", "reasons": ["avg 12 chars/page over 30 pages"] } ],
+  "skipped":  [ { "file": "a.doc", "reason": "needs WPS/Office or LibreOffice" } ]
+}
+```
+
+`succeeded` and `warned` are mutually exclusive. An agent should report `warned`
+(and `failures`/`skipped`) back to the user — never present output as trustworthy
+without checking. Each suspect `.md` also carries `quality: suspect` + `warnings`
+in frontmatter, so downstream (Obsidian/Dataview) can filter on it.
+
+## Programmatic use (non-CLI agents)
+
+```python
+from pathlib import Path
+from makeitdown.pipeline import convert_tree
+
+report = convert_tree(
+    Path("in"), Path("out"),
+    ocr_engine="auto", ocr_model="PP-StructureV3", cloud_token=None,
+    workers=4, skip_existing=True, text_threshold=50,
+    report_path=Path("out/report.json"),
+)
+# report is the same dict written to report.json
+```
+
+## Installing this skill into another agent
+
+This `skill/makeitdown/` directory *is* the package. Copy it into the target
+agent's skills location (e.g. an agent's `.claude/skills/makeitdown/` or a plugin's
+`skills/` dir). The skill drives installation of the `makeitdown` CLI itself on
+first use (see First run). The CLI and the skill are distributed separately: the
+PyPI/Gitee package ships the CLI; this folder ships the agent instructions.
 
 ## Legacy .doc / .wps files (install transparency — read before acting)
 
