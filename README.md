@@ -2,6 +2,11 @@
 
 把一整个文件夹的文档**批量转换为高保真 Markdown**，作为 LLM 知识库的原材料。中国大陆可用，无需海外服务。
 
+> 🤖 **完全不懂技术？** 去 [Releases](https://github.com/code-lawyer/makeitdown/releases) 下载
+> `makeitdown-agent.zip`，解压后把整个文件夹（或里面的 `SKILL.md`）发给你的 AI 助手，
+> 说一句"帮我用 makeitdown 把这个文件夹的文档转成 markdown"即可——助手会自动安装并运行。
+> 详见包内 `给你的AI助手.md`。（没有 Release 时，点 `Code → Download ZIP` 把整个仓库发给助手也行。）
+
 基于 [microsoft/markitdown](https://github.com/microsoft/markitdown)（原生格式）与 [PaddleOCR](https://github.com/PaddlePaddle/PaddleOCR)（扫描件/图片）。
 
 ## 它做什么

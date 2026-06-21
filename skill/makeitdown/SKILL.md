@@ -54,9 +54,20 @@ GitHub and PyPI are slow/flaky from China; build the install around domestic mir
    pip install uv -i https://pypi.tuna.tsinghua.edu.cn/simple
    ```
 
-### Step 3 — Install the chosen edition (Gitee source + Tsinghua mirror)
+### Step 3 — Install the chosen edition
 
-Run **one** of these:
+**If you were handed the agent bundle** (an unzipped `makeitdown-agent` folder that
+contains `pyproject.toml` and `src/`), install directly from it — no Gitee/GitHub
+fetch needed. From inside that folder:
+
+```bash
+# Local edition
+pip install ".[local]" -i https://pypi.tuna.tsinghua.edu.cn/simple
+# Cloud edition
+pip install "." -i https://pypi.tuna.tsinghua.edu.cn/simple
+```
+
+**Otherwise, install from the remote** (Gitee source + Tsinghua mirror). Run **one** of these:
 
 - **本地版 (Local):**
   ```bash
